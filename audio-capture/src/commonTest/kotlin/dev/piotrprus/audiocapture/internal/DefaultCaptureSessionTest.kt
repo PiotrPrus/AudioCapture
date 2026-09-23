@@ -6,11 +6,15 @@ import dev.piotrprus.audiocapture.AudioEncoder
 import dev.piotrprus.audiocapture.CaptureConfig
 import dev.piotrprus.audiocapture.CaptureState
 import dev.piotrprus.audiocapture.FileOutput
+import dev.piotrprus.audiocapture.InputDevice
 import dev.piotrprus.audiocapture.InterruptionMode
 import dev.piotrprus.audiocapture.PauseReason
 import dev.piotrprus.audiocapture.PcmEncoding
 import dev.piotrprus.audiocapture.Recording
 import dev.piotrprus.audiocapture.StreamOutput
+import dev.piotrprus.audiocapture.VoiceProcessing
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -36,6 +40,9 @@ class DefaultCaptureSessionTest {
         var running = false
         var stopped = false
         var failOnStart: AudioCaptureException? = null
+        var pauses = 0
+        override val routedDevice: InputDevice? = null
+        override val appliedVoiceProcessing: VoiceProcessing? = null
 
         override fun start(listener: CaptureEngine.Listener) {
             failOnStart?.let { throw it }
@@ -45,6 +52,7 @@ class DefaultCaptureSessionTest {
 
         override fun pause() {
             running = false
+            pauses++
         }
 
         override fun resume() {
@@ -292,12 +300,80 @@ class DefaultCaptureSessionTest {
 
     @Test
     fun stop_after_stop_returns_the_same_recording() = runTest {
-        val session = session(base.copy(file = FileOutput("/tmp/a.m4a")), writer = FakeWriter())
+        val engine = FakeEngine()
+        val session = session(base.copy(file = FileOutput("/tmp/a.m4a")), engine, FakeWriter())
+        engine.emit(80)
+        advanceUntilIdle()
 
         val first = session.stop()
         val second = session.stop()
 
+        assertEquals("/tmp/a.m4a", first?.path)
         assertEquals(first, second)
+    }
+
+    @Test
+    fun stopping_before_any_audio_deletes_the_empty_file() = runTest {
+        val writer = FakeWriter()
+        val session = session(base.copy(file = FileOutput("/tmp/a.m4a")), writer = writer)
+
+        assertNull(session.stop())
+        assertTrue(writer.deleted)
+        assertEquals(false, writer.closed)
+    }
+
+    @Test
+    fun a_file_that_fails_to_finish_is_deleted_and_not_returned() = runTest {
+        val engine = FakeEngine()
+        var deleted = false
+        val writer = object : AudioFileWriter {
+            override fun write(samples: FloatArray, count: Int) = Unit
+            override fun close() = throw AudioCaptureException("muxer")
+            override fun delete() { deleted = true }
+        }
+        val session = session(base.copy(file = FileOutput("/tmp/a.m4a")), engine, writer)
+        engine.emit(80)
+        advanceUntilIdle()
+
+        assertNull(session.stop())
+        assertTrue(deleted)
+    }
+
+    @Test
+    fun pause_mode_releases_the_microphone_on_interruption() = runTest {
+        val engine = FakeEngine()
+        val session = session(engine = engine)
+
+        engine.listener.onInterruptionBegan()
+        advanceUntilIdle()
+
+        assertEquals(1, engine.pauses)
+        assertEquals(false, engine.running)
+        session.stop()
+    }
+
+    @Test
+    fun pause_resume_mode_keeps_the_engine_during_an_interruption() = runTest {
+        val engine = FakeEngine()
+        val session = session(base.copy(interruption = InterruptionMode.PauseResume), engine)
+
+        engine.listener.onInterruptionBegan()
+        advanceUntilIdle()
+
+        assertEquals(0, engine.pauses)
+        session.stop()
+    }
+
+    @Test
+    fun chunks_can_only_be_collected_once() = runTest {
+        val engine = FakeEngine()
+        val session = session(engine = engine)
+        val first = launch { session.chunks.collect {} }
+        advanceUntilIdle()
+
+        assertFailsWith<IllegalStateException> { session.chunks.first() }
+        first.cancel()
+        session.stop()
     }
 
     @Test

@@ -2,9 +2,12 @@ package dev.piotrprus.audiocapture.internal
 
 import dev.piotrprus.audiocapture.AudioCaptureException
 import dev.piotrprus.audiocapture.CaptureConfig
+import dev.piotrprus.audiocapture.ExperimentalVoiceProcessing
+import dev.piotrprus.audiocapture.InputDevice
 import dev.piotrprus.audiocapture.InterruptionMode
 import dev.piotrprus.audiocapture.IosSessionCategory
 import dev.piotrprus.audiocapture.IosSessionMode
+import dev.piotrprus.audiocapture.VoiceProcessing
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -43,6 +46,7 @@ import platform.AVFAudio.AVAudioSessionModeVoiceChat
 import platform.AVFAudio.AVAudioSessionPortDescription
 import platform.AVFAudio.AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
 import platform.AVFAudio.availableInputs
+import platform.AVFAudio.currentRoute
 import platform.AVFAudio.setActive
 import platform.Foundation.NSError
 import platform.Foundation.NSNotification
@@ -78,7 +82,16 @@ internal class IosCaptureEngine(private val config: CaptureConfig) : CaptureEngi
     private var engine: AVAudioEngine? = null
     private var converter: AVAudioConverter? = null
     private var userPaused = false
+    private var voiceProcessingOn = false
     private lateinit var listener: CaptureEngine.Listener
+
+    override val routedDevice: InputDevice?
+        get() = session.currentRoute.inputs.filterIsInstance<AVAudioSessionPortDescription>().firstOrNull()?.toInputDevice()
+
+    @OptIn(ExperimentalVoiceProcessing::class)
+    override val appliedVoiceProcessing: VoiceProcessing?
+        // iOS voice processing always cancels echo and suppresses noise together.
+        get() = if (voiceProcessingOn) VoiceProcessing(echoCancel = true, noiseSuppress = true, autoGain = config.voiceProcessing?.autoGain == true) else null
 
     override fun start(listener: CaptureEngine.Listener) = locked {
         this.listener = listener
@@ -88,6 +101,7 @@ internal class IosCaptureEngine(private val config: CaptureConfig) : CaptureEngi
         config.voiceProcessing?.takeIf { it.echoCancel || it.noiseSuppress || it.autoGain }?.let { wanted ->
             nsCheck("Could not enable voice processing") { created.inputNode.setVoiceProcessingEnabled(true, it) }
             created.inputNode.setVoiceProcessingAGCEnabled(wanted.autoGain)
+            voiceProcessingOn = true
         }
         installTap(created)
         observe(created)

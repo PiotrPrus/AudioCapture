@@ -10,7 +10,8 @@ import kotlin.time.Duration.Companion.seconds
  *
  * Dividing by full scale leaves a meter nearly flat, because ordinary speech peaks far below it.
  * Dividing by a fixed reference measured on one phone pins the meter at 1.0 on another whose input
- * runs hotter (iOS typically runs about twice as hot as Android). So the reference adapts: it
+ * runs hotter (input gain varies with the platform, the audio source or mode, and whether gain
+ * control is on; the iOS record path often runs hotter than Android's). So the reference adapts: it
  * rises within [attack] when the microphone turns out louder than assumed, and falls back over
  * [release] so a pause does not make the next quiet word read as a shout.
  *
@@ -54,7 +55,11 @@ public class LevelNormalizer(
     private fun Duration.inSeconds(): Float = inWholeMicroseconds / 1_000_000f
 
     public companion object {
-        /** Peak of conversational speech on a typical Android phone microphone, relative to full scale. */
+        /**
+         * Peak of conversational speech measured on an Android phone with
+         * [AndroidAudioSource.VoiceRecognition] (no gain control), relative to full scale. A
+         * starting point, not a constant of nature: pass your own floor for other setups.
+         */
         public const val DEFAULT_FLOOR: Float = 0.43f
     }
 }

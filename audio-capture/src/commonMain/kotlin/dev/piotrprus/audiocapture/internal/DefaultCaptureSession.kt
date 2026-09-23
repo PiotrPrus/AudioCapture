@@ -6,12 +6,14 @@ import dev.piotrprus.audiocapture.AudioLevel
 import dev.piotrprus.audiocapture.CaptureConfig
 import dev.piotrprus.audiocapture.CaptureSession
 import dev.piotrprus.audiocapture.CaptureState
+import dev.piotrprus.audiocapture.InputDevice
 import dev.piotrprus.audiocapture.InterruptionMode
 import dev.piotrprus.audiocapture.PauseReason
 import dev.piotrprus.audiocapture.Pcm
 import dev.piotrprus.audiocapture.PcmEncoding
 import dev.piotrprus.audiocapture.PcmFormat
 import dev.piotrprus.audiocapture.Recording
+import dev.piotrprus.audiocapture.VoiceProcessing
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -25,8 +27,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlin.concurrent.atomics.AtomicBoolean
+import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.ExperimentalAtomicApi
+import kotlin.concurrent.atomics.decrementAndFetch
+import kotlin.concurrent.atomics.incrementAndFetch
 import kotlin.time.Duration.Companion.microseconds
 
 /**
@@ -35,9 +44,10 @@ import kotlin.time.Duration.Companion.microseconds
  * Everything that changes state — audio from the engine's thread, interruptions, calls from the
  * app — goes through one channel and is handled by one coroutine, so there is no locking and
  * events apply in the order they happened. Audio that arrives while the session is not recording
- * is dropped; that is also how an Android interruption is paused, since the engine keeps running
- * there to learn when the microphone comes back.
+ * is dropped; that is also how an Android interruption is paused in [InterruptionMode.PauseResume],
+ * since the engine keeps running there to learn when the microphone comes back.
  */
+@OptIn(ExperimentalAtomicApi::class)
 internal class DefaultCaptureSession(
     private val config: CaptureConfig,
     private val engine: CaptureEngine,
@@ -57,13 +67,25 @@ internal class DefaultCaptureSession(
     private val _level = MutableStateFlow(AudioLevel.Silence)
     override val level: StateFlow<AudioLevel> = _level.asStateFlow()
 
+    override val inputDevice: InputDevice? get() = engine.routedDevice
+
+    override val voiceProcessing: VoiceProcessing? get() = engine.appliedVoiceProcessing
+
     private val output = Channel<AudioChunk>(
         capacity = config.stream?.bufferedChunks ?: 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
-    override val chunks: Flow<AudioChunk> = output.receiveAsFlow()
+    private val collected = AtomicBoolean(false)
+    override val chunks: Flow<AudioChunk> = flow {
+        // A second collector would silently receive every other chunk; fail loudly instead.
+        check(collected.compareAndSet(expectedValue = false, newValue = true)) {
+            "CaptureSession.chunks can only be collected once. Share it with shareIn() for several consumers."
+        }
+        emitAll(output.receiveAsFlow())
+    }
 
     private val events = Channel<Event>(Channel.UNLIMITED)
+    private val pendingAudio = AtomicInt(0)
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
 
     private val chunkSamples = config.framesPerChunk * config.channels
@@ -74,6 +96,12 @@ internal class DefaultCaptureSession(
 
     private val listener = object : CaptureEngine.Listener {
         override fun onAudio(samples: FloatArray) {
+            // A stalled file writer must not grow the queue without bound: past a few seconds of
+            // backlog the newest audio is dropped rather than the process running out of memory.
+            if (pendingAudio.incrementAndFetch() > MAX_PENDING_AUDIO) {
+                pendingAudio.decrementAndFetch()
+                return
+            }
             events.trySend(Event.Audio(samples))
         }
 
@@ -127,7 +155,10 @@ internal class DefaultCaptureSession(
         for (event in events) {
             try {
                 when (event) {
-                    is Event.Audio -> onAudio(event.samples)
+                    is Event.Audio -> {
+                        pendingAudio.decrementAndFetch()
+                        onAudio(event.samples)
+                    }
                     Event.Pause -> onPause()
                     Event.Resume -> onResume()
                     Event.InterruptionBegan -> onInterruptionBegan()
@@ -145,13 +176,8 @@ internal class DefaultCaptureSession(
             } catch (e: Exception) {
                 // A file that cannot be written or an engine that cannot pause ends the session;
                 // it must never escape into the app as an uncaught exception.
-                val error = e as? AudioCaptureException ?: AudioCaptureException("Capture failed", e)
-                if (event is Event.Finish) {
-                    terminateAfterFailure(error)
-                    event.reply.complete(result)
-                } else {
-                    terminateAfterFailure(error)
-                }
+                terminateAfterFailure(e as? AudioCaptureException ?: AudioCaptureException("Capture failed", e))
+                if (event is Event.Finish) event.reply.complete(result)
                 break
             }
         }
@@ -209,6 +235,9 @@ internal class DefaultCaptureSession(
     private fun onInterruptionBegan() {
         if (config.interruption == InterruptionMode.None) return
         if (_state.value == CaptureState.Recording) {
+            // Pause waits for the app to resume, so the microphone is released like a user pause.
+            // PauseResume keeps the engine so it can hear when the microphone comes back.
+            if (config.interruption == InterruptionMode.Pause) engine.pause()
             _state.value = CaptureState.Paused(PauseReason.Interruption)
             _level.value = AudioLevel.Silence
         }
@@ -232,36 +261,36 @@ internal class DefaultCaptureSession(
         }
     }
 
-    /** Ends the session after [terminate] or a handler threw; nothing here may throw again. */
-    private fun terminateAfterFailure(error: AudioCaptureException) {
-        if (_state.value is CaptureState.Stopped) return
+    private fun terminate(discard: Boolean, error: AudioCaptureException?) {
         runCatching { engine.stop() }
-        runCatching { writer?.close() }
+        if (!discard) emitPending()
+        val file = config.file
+        val fileWriter = writer
+        if (fileWriter != null && file != null) {
+            // Nothing captured means no playable file: remove it rather than hand back an empty one.
+            if (discard || framesEmitted == 0L) {
+                fileWriter.delete()
+            } else if (runCatching { fileWriter.close() }.isSuccess) {
+                result = Recording(
+                    path = file.path,
+                    encoder = file.encoder,
+                    durationMillis = framesEmitted * 1000 / config.sampleRate,
+                )
+            } else {
+                fileWriter.delete()
+            }
+        }
+        pendingCount = 0
         _level.value = AudioLevel.Silence
         _state.value = CaptureState.Stopped(error)
         output.close(error)
     }
 
-    private fun terminate(discard: Boolean, error: AudioCaptureException?) {
+    /** Ends the session after a handler threw; nothing here may throw again. */
+    private fun terminateAfterFailure(error: AudioCaptureException) {
+        if (_state.value is CaptureState.Stopped) return
         runCatching { engine.stop() }
-        if (discard) {
-            pendingCount = 0
-            writer?.delete()
-        } else {
-            emitPending()
-            val file = config.file
-            val fileWriter = writer
-            if (fileWriter != null && file != null) {
-                val closed = runCatching { fileWriter.close() }
-                if (closed.isSuccess) {
-                    result = Recording(
-                        path = file.path,
-                        encoder = file.encoder,
-                        durationMillis = framesEmitted * 1000 / config.sampleRate,
-                    )
-                }
-            }
-        }
+        runCatching { writer?.close() }
         _level.value = AudioLevel.Silence
         _state.value = CaptureState.Stopped(error)
         output.close(error)
@@ -275,5 +304,10 @@ internal class DefaultCaptureSession(
         class InterruptionEnded(val shouldResume: Boolean) : Event
         class Failed(val error: AudioCaptureException) : Event
         class Finish(val discard: Boolean, val reply: CompletableDeferred<Recording?>) : Event
+    }
+
+    private companion object {
+        /** Engine blocks waiting to be processed before new audio is dropped. */
+        const val MAX_PENDING_AUDIO = 500
     }
 }

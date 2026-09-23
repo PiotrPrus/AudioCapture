@@ -34,8 +34,11 @@ public interface AudioCapture {
      */
     public fun inputDevices(): List<InputDevice>
 
-    /** Whether this platform can write files with [encoder]. */
-    public fun isSupported(encoder: AudioEncoder): Boolean
+    /**
+     * Whether this device can write [encoder] files at [sampleRate] with [channels]. AAC is limited
+     * to 8–48 kHz. [start] checks this and throws [AudioCaptureException] with the reason.
+     */
+    public fun isSupported(encoder: AudioEncoder, sampleRate: Int = 16_000, channels: Int = 1): Boolean
 
     /**
      * Opens the microphone and starts capturing with [config].
