@@ -14,6 +14,10 @@ import platform.AVFAudio.AVAudioSessionCategoryPlayAndRecord
 import platform.AVFAudio.AVAudioSessionCategoryRecord
 import platform.AVFAudio.AVAudioSessionPortDescription
 import platform.AVFAudio.availableInputs
+import platform.Foundation.NSApplicationSupportDirectory
+import platform.Foundation.NSFileManager
+import platform.Foundation.NSURL
+import platform.Foundation.NSUserDomainMask
 
 public actual fun AudioCapture(): AudioCapture = IosAudioCapture()
 
@@ -23,6 +27,16 @@ private class IosAudioCapture : AudioCapture {
     private val session get() = AVAudioSession.sharedInstance()
 
     override fun permission(): MicPermission = IosPermission.current()
+
+    override suspend fun requestPermission(): MicPermission = IosPermission.request()
+
+    override fun recordingPath(fileName: String): String {
+        val support = NSFileManager.defaultManager.URLsForDirectory(NSApplicationSupportDirectory, NSUserDomainMask)
+            .firstOrNull() as? NSURL ?: error("No Application Support directory")
+        val directory = support.URLByAppendingPathComponent("recordings") ?: error("Bad recordings directory")
+        NSFileManager.defaultManager.createDirectoryAtURL(directory, withIntermediateDirectories = true, attributes = null, error = null)
+        return directory.URLByAppendingPathComponent(fileName)?.path ?: error("Bad file name $fileName")
+    }
 
     /**
      * iOS only lists inputs while the audio session category can record. When it cannot (the
@@ -54,7 +68,7 @@ private class IosAudioCapture : AudioCapture {
     override suspend fun start(config: CaptureConfig): CaptureSession = withContext(Dispatchers.IO) {
         // Without permission iOS delivers silence rather than an error, so never start without it.
         if (IosPermission.request() != MicPermission.Granted) {
-            throw AudioCaptureException("Microphone permission was denied")
+            throw AudioCaptureException("Microphone permission was refused")
         }
         val writer = config.file?.let { file ->
             if (!isSupported(file.encoder, config.sampleRate, config.channels)) {

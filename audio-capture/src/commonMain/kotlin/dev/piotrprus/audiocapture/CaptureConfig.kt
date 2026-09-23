@@ -7,7 +7,7 @@ import kotlin.time.Duration.Companion.milliseconds
  * What to capture and where it goes.
  *
  * The defaults suit speech: 16 kHz mono PCM16 in 100 ms chunks, the format most speech-to-text
- * APIs expect. Set [file] to also record, or set [stream] to `null` to only record.
+ * APIs expect. Set [file] to also record, or set [pcm] to `null` to only record.
  */
 public data class CaptureConfig(
     /**
@@ -25,7 +25,7 @@ public data class CaptureConfig(
     /** How much audio each [AudioChunk] holds and how often [CaptureSession.level] updates. */
     val chunkDuration: Duration = 100.milliseconds,
     /** Raw PCM delivered through [CaptureSession.chunks], or `null` for none. */
-    val stream: StreamOutput? = StreamOutput(),
+    val pcm: PcmOutput? = PcmOutput(),
     /** A file written while capturing, or `null` for none. */
     val file: FileOutput? = null,
     /** Preferred microphone, from [AudioCapture.inputDevices]. `null` is the system default. */
@@ -43,14 +43,15 @@ public data class CaptureConfig(
         require(sampleRate in 8_000..96_000) { "sampleRate must be 8000..96000, was $sampleRate" }
         require(channels == 1 || channels == 2) { "channels must be 1 or 2, was $channels" }
         require(chunkDuration >= 10.milliseconds) { "chunkDuration must be at least 10 ms" }
-        require(stream != null || file != null) { "Set stream, file, or both" }
+        require(pcm != null || file != null) { "Set pcm, file, or both" }
     }
 
     internal val framesPerChunk: Int
         get() = (sampleRate * chunkDuration.inWholeMicroseconds / 1_000_000).toInt().coerceAtLeast(1)
 }
 
-public data class StreamOutput(
+/** How [CaptureSession.chunks] delivers raw PCM. */
+public data class PcmOutput(
     val encoding: PcmEncoding = PcmEncoding.Int16,
     /** Chunks kept while nobody collects. 50 × 100 ms = 5 s. Older chunks are dropped. */
     val bufferedChunks: Int = 50,
@@ -61,9 +62,13 @@ public data class StreamOutput(
 }
 
 public data class FileOutput(
-    /** Absolute path. An existing file is overwritten. */
+    /**
+     * Absolute path. An existing file is overwritten. [AudioCapture.recordingPath] gives one in the
+     * app's private storage.
+     */
     val path: String,
-    val encoder: AudioEncoder = AudioEncoder.AacLc,
+    /** Picked from the extension by default: `.wav` is [AudioEncoder.Wav], anything else AAC. */
+    val encoder: AudioEncoder = AudioEncoder.forPath(path),
     /**
      * Bits per second for compressed encoders; ignored for [AudioEncoder.Wav]. On iOS it is
      * lowered to the highest rate the encoder supports for the sample rate and channel count
@@ -73,11 +78,18 @@ public data class FileOutput(
 )
 
 public enum class AudioEncoder {
-    /** AAC-LC in an MPEG-4 container. Use a `.m4a` path. */
+    /** AAC-LC in an MPEG-4 container. Small files. Use a `.m4a` path. */
     AacLc,
 
-    /** Uncompressed 16-bit PCM in a RIFF container. Use a `.wav` path. */
+    /** Uncompressed 16-bit PCM in a RIFF container. Large files, no quality loss. Use a `.wav` path. */
     Wav,
+    ;
+
+    public companion object {
+        /** [Wav] for a `.wav` path, [AacLc] otherwise. */
+        public fun forPath(path: String): AudioEncoder =
+            if (path.endsWith(".wav", ignoreCase = true)) Wav else AacLc
+    }
 }
 
 /**

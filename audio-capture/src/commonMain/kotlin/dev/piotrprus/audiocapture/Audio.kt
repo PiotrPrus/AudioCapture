@@ -22,9 +22,10 @@ public data class PcmFormat(
 }
 
 /**
- * One block of interleaved PCM.
+ * One block of interleaved PCM: [CaptureConfig.chunkDuration] of audio.
  *
- * [bytes] is little-endian in [format]. [timestamp] counts captured audio from the start of the
+ * A *frame* is one sample per channel, so in mono a frame is a single sample. [bytes] is
+ * little-endian in [format]; if you just want numbers, call [toFloatArray]. [timestamp] counts captured audio from the start of the
  * session, not wall time, so it does not jump across a pause.
  */
 public class AudioChunk(
@@ -43,7 +44,13 @@ public class AudioChunk(
         return Pcm.int16ToShorts(bytes)
     }
 
-    /** Samples as -1.0..1.0 floats, whatever the encoding. */
+    /** Peak and RMS loudness of this chunk, for waveforms and meters. */
+    public fun level(): AudioLevel {
+        val samples = toFloatArray()
+        return Pcm.level(samples, samples.size)
+    }
+
+    /** Samples as -1.0..1.0 floats, whatever the encoding. The easiest way to work with the audio. */
     public fun toFloatArray(): FloatArray = when (format.encoding) {
         PcmEncoding.Int16 -> Pcm.int16ToFloats(bytes)
         PcmEncoding.Float32 -> Pcm.float32ToFloats(bytes)

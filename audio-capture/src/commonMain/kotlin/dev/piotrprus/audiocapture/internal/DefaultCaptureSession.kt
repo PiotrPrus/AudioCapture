@@ -8,6 +8,7 @@ import dev.piotrprus.audiocapture.CaptureSession
 import dev.piotrprus.audiocapture.CaptureState
 import dev.piotrprus.audiocapture.InputDevice
 import dev.piotrprus.audiocapture.InterruptionMode
+import dev.piotrprus.audiocapture.LevelNormalizer
 import dev.piotrprus.audiocapture.PauseReason
 import dev.piotrprus.audiocapture.Pcm
 import dev.piotrprus.audiocapture.PcmEncoding
@@ -49,7 +50,7 @@ import kotlin.time.Duration.Companion.microseconds
  */
 @OptIn(ExperimentalAtomicApi::class)
 internal class DefaultCaptureSession(
-    private val config: CaptureConfig,
+    override val config: CaptureConfig,
     private val engine: CaptureEngine,
     private val writer: AudioFileWriter?,
     dispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -58,7 +59,7 @@ internal class DefaultCaptureSession(
     override val format: PcmFormat = PcmFormat(
         sampleRate = config.sampleRate,
         channels = config.channels,
-        encoding = config.stream?.encoding ?: PcmEncoding.Int16,
+        encoding = config.pcm?.encoding ?: PcmEncoding.Int16,
     )
 
     private val _state = MutableStateFlow<CaptureState>(CaptureState.Recording)
@@ -67,12 +68,16 @@ internal class DefaultCaptureSession(
     private val _level = MutableStateFlow(AudioLevel.Silence)
     override val level: StateFlow<AudioLevel> = _level.asStateFlow()
 
+    private val normalizer = LevelNormalizer()
+    private val _normalizedLevel = MutableStateFlow(0f)
+    override val normalizedLevel: StateFlow<Float> = _normalizedLevel.asStateFlow()
+
     override val inputDevice: InputDevice? get() = engine.routedDevice
 
     override val voiceProcessing: VoiceProcessing? get() = engine.appliedVoiceProcessing
 
     private val output = Channel<AudioChunk>(
-        capacity = config.stream?.bufferedChunks ?: 1,
+        capacity = config.pcm?.bufferedChunks ?: 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     private val collected = AtomicBoolean(false)
@@ -205,8 +210,11 @@ internal class DefaultCaptureSession(
 
     private fun emitPending() {
         if (pendingCount == 0) return
-        _level.value = Pcm.level(pending, pendingCount)
-        config.stream?.let { stream ->
+        val level = Pcm.level(pending, pendingCount)
+        _level.value = level
+        // Advanced on every chunk, including repeats, so the normaliser's slow fall-back keeps time.
+        _normalizedLevel.value = normalizer.normalize(level, config.chunkDuration)
+        config.pcm?.let { stream ->
             output.trySend(
                 AudioChunk(
                     bytes = Pcm.encode(pending, pendingCount, stream.encoding),
@@ -224,7 +232,7 @@ internal class DefaultCaptureSession(
         if (current == CaptureState.Recording || current is CaptureState.Paused && current.reason == PauseReason.Interruption) {
             engine.pause()
             _state.value = CaptureState.Paused(PauseReason.User)
-            _level.value = AudioLevel.Silence
+            clearLevels()
         }
     }
 
@@ -239,7 +247,7 @@ internal class DefaultCaptureSession(
             // PauseResume keeps the engine so it can hear when the microphone comes back.
             if (config.interruption == InterruptionMode.Pause) engine.pause()
             _state.value = CaptureState.Paused(PauseReason.Interruption)
-            _level.value = AudioLevel.Silence
+            clearLevels()
         }
     }
 
@@ -281,7 +289,7 @@ internal class DefaultCaptureSession(
             }
         }
         pendingCount = 0
-        _level.value = AudioLevel.Silence
+        clearLevels()
         _state.value = CaptureState.Stopped(error)
         output.close(error)
     }
@@ -291,9 +299,14 @@ internal class DefaultCaptureSession(
         if (_state.value is CaptureState.Stopped) return
         runCatching { engine.stop() }
         runCatching { writer?.close() }
-        _level.value = AudioLevel.Silence
+        clearLevels()
         _state.value = CaptureState.Stopped(error)
         output.close(error)
+    }
+
+    private fun clearLevels() {
+        _level.value = AudioLevel.Silence
+        _normalizedLevel.value = 0f
     }
 
     private sealed interface Event {

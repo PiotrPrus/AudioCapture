@@ -1,16 +1,16 @@
 package dev.piotrprus.audiocapture
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
 import android.media.AudioManager
 import androidx.startup.Initializer
 import dev.piotrprus.audiocapture.internal.AacFileWriter
 import dev.piotrprus.audiocapture.internal.AacSupport
 import dev.piotrprus.audiocapture.internal.AndroidCaptureEngine
 import dev.piotrprus.audiocapture.internal.DefaultCaptureSession
+import dev.piotrprus.audiocapture.internal.PermissionRequester
 import dev.piotrprus.audiocapture.internal.WavFileWriter
 import dev.piotrprus.audiocapture.internal.toInputDevice
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -44,11 +44,15 @@ private class AndroidAudioCapture(private val context: Context) : AudioCapture {
     private val audioManager = context.getSystemService(AudioManager::class.java)
 
     override fun permission(): MicPermission =
-        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            MicPermission.Granted
-        } else {
-            MicPermission.Denied
-        }
+        if (PermissionRequester.isGranted(context)) MicPermission.Granted else MicPermission.Denied
+
+    override suspend fun requestPermission(): MicPermission =
+        if (PermissionRequester.request(context)) MicPermission.Granted else MicPermission.Denied
+
+    override fun recordingPath(fileName: String): String {
+        val directory = File(context.filesDir, "recordings").apply { mkdirs() }
+        return File(directory, fileName).absolutePath
+    }
 
     /**
      * Bluetooth headset microphones are left out: recording from them needs the app to route
@@ -65,8 +69,8 @@ private class AndroidAudioCapture(private val context: Context) : AudioCapture {
     }
 
     override suspend fun start(config: CaptureConfig): CaptureSession = withContext(Dispatchers.IO) {
-        if (permission() != MicPermission.Granted) {
-            throw AudioCaptureException("RECORD_AUDIO permission is not granted")
+        if (requestPermission() != MicPermission.Granted) {
+            throw AudioCaptureException("Microphone permission was refused")
         }
         val writer = config.file?.let { file ->
             if (!isSupported(file.encoder, config.sampleRate, config.channels)) {
