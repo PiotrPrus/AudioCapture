@@ -133,18 +133,43 @@ public enum class AndroidAudioSource {
 public data class IosOptions(
     /**
      * Let the library configure and activate `AVAudioSession` for each session and deactivate it
-     * afterwards. Turn off if your app manages the audio session itself.
+     * afterwards. Turn off if your app manages the audio session itself; the category must then
+     * allow recording before [AudioCapture.start].
      */
     val manageAudioSession: Boolean = true,
     val category: IosSessionCategory = IosSessionCategory.PlayAndRecord,
     val mode: IosSessionMode = IosSessionMode.Default,
-    /** Allow Bluetooth headset microphones. */
-    val allowBluetooth: Boolean = true,
+    /**
+     * Whether a Bluetooth headset may be the microphone. Off by default: recording through
+     * [IosBluetoothInput.Hfp] switches the headset to its call profile (8–16 kHz) for all audio on
+     * the device while the session is active.
+     */
+    val bluetoothInput: IosBluetoothInput = IosBluetoothInput.Off,
     /** Keep other apps' audio playing. [IosSessionCategory.PlayAndRecord] only. */
     val mixWithOthers: Boolean = false,
     /** Route output to the speaker rather than the receiver. [IosSessionCategory.PlayAndRecord] only. */
     val defaultToSpeaker: Boolean = true,
+    /**
+     * Deactivate the audio session on [CaptureSession.pause] so other apps' audio can resume.
+     * Off by default: deactivating also stops your own app's playback, and reactivating makes
+     * [CaptureSession.resume] take about half a second. The microphone is released either way.
+     */
+    val deactivateOnPause: Boolean = false,
 )
+
+public enum class IosBluetoothInput {
+    /** Record from the phone (or a wired headset) even when a Bluetooth headset is connected. */
+    Off,
+
+    /** Allow the Bluetooth hands-free profile: works with every headset, at call quality (8–16 kHz). */
+    Hfp,
+
+    /**
+     * Prefer high-quality Bluetooth recording on AirPods that support it (iOS 26+), falling back to
+     * [Hfp] elsewhere.
+     */
+    HighQuality,
+}
 
 public enum class IosSessionCategory {
     /** Record only; silences other audio. */
@@ -157,12 +182,12 @@ public enum class IosSessionCategory {
 public enum class IosSessionMode {
     Default,
 
-    /** Minimal system processing. Good for analysis or when you want the rawest signal. */
+    /** Minimal system processing, with input gain control turned off. Good for analysis. */
     Measurement,
 
-    /** Optimised for two-way voice. */
+    /**
+     * For voice-over-IP apps. Uses Apple's voice processing and limits routes to voice-capable
+     * ones; the voice sounds like a call.
+     */
     VoiceChat,
-
-    /** Optimised for spoken content such as dictation. */
-    SpokenAudio,
 }

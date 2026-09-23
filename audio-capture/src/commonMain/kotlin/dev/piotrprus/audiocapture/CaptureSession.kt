@@ -86,8 +86,8 @@ public enum class PauseReason {
     /**
      * The system took the microphone away.
      *
-     * On iOS: a phone call, Siri, an alarm, or another app's audio session that does not mix with
-     * yours. On Android (API 29+) the system silenced the recorder, most often because the app
+     * On iOS: a phone call, Siri, an alarm, another app's audio session that does not mix with
+     * yours, or the app being suspended in the background. On Android (API 29+) the system silenced the recorder, most often because the app
      * went to the background without a microphone foreground service, or another app with
      * priority started capturing. Below API 29 Android reports no interruptions.
      */
@@ -108,6 +108,9 @@ public enum class MicPermission {
     Granted,
     Denied,
 
-    /** iOS only: never asked. The system prompts the first time a session starts. */
+    /**
+     * iOS only: never asked. [AudioCapture.start] asks first and throws if the user declines, so a
+     * session never records the silence iOS delivers without permission.
+     */
     NotDetermined,
 }

@@ -13,7 +13,9 @@ First release.
 - Input device listing and selection.
 - Experimental echo cancellation, noise suppression and automatic gain control (`VoiceProcessing`, opt-in with `@ExperimentalVoiceProcessing`). On iOS it runs Apple's voice processing, which noticeably changes the tone of the voice.
 - Android audio source selection.
-- iOS audio session category, mode and options, or leave the session to the app.
+- iOS audio session category, mode (`Default`, `Measurement`, `VoiceChat`), Bluetooth input (`Off`, `Hfp`, `HighQuality` on iOS 26), and whether pausing deactivates the session; or leave the session to the app.
+- iOS asks for microphone permission on the first `start()` and fails if declined, rather than recording silence.
+- iOS recovers from media services resets and route changes, including those that arrive during an interruption.
 - Sample app for Android and iOS.
 - `CaptureSession.inputDevice` (the microphone actually in use) and `CaptureSession.voiceProcessing` (the effects that actually took effect).
 - `stop()` returns `null` and deletes the file when nothing was captured, instead of returning an unplayable file.

@@ -19,10 +19,8 @@ public interface AudioCapture {
     /**
      * Current microphone permission.
      *
-     * The library does not request it. Ask before the first [start]: on Android through the
-     * usual runtime-permission flow, on iOS with `AVAudioApplication.requestRecordPermission`. If
-     * iOS has never asked, starting a session shows the system prompt and the first moments of
-     * audio are silence.
+     * On iOS, [start] asks when the user has never been asked, and fails if they decline. On
+     * Android, request `RECORD_AUDIO` through the usual runtime-permission flow before [start].
      */
     public fun permission(): MicPermission
 
