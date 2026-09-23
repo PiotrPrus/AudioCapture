@@ -53,6 +53,11 @@ public class AudioChunk(
 /**
  * Loudness of one chunk, linear 0..1 relative to full scale.
  *
+ * Both values use the plain sample-value convention: a full-scale square wave reads 0 dBFS peak
+ * and RMS, a full-scale sine reads 0 dBFS peak and about -3 dBFS RMS (not the AES17 convention,
+ * which adds 3 dB to RMS). Conversational speech close to a phone typically peaks around -20 to
+ * -10 dBFS.
+ *
  * Use [peakDbfs] or [rmsDbfs] for meters in decibels, or feed a [LevelNormalizer] for a 0..1 value
  * that behaves the same across devices.
  */

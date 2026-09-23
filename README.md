@@ -90,7 +90,7 @@ CaptureConfig(
 | WAV file | 16-bit PCM | 16-bit PCM |
 | Interruptions | Recording callback `isClientSilenced` (API 29+) | `AVAudioSession` interruption notifications |
 | Route changes | Handled by the system | Tap rebuilt for the new input format |
-| Input devices | `AudioManager.getDevices` + `setPreferredDevice` | `availableInputs` + `setPreferredInput` |
+| Input devices | `AudioManager.getDevices` + `setPreferredDevice` (Bluetooth headsets not listed yet) | `availableInputs` + `setPreferredInput` |
 
 ### Voice processing (experimental)
 
@@ -104,11 +104,23 @@ val config = CaptureConfig(voiceProcessing = VoiceProcessing(echoCancel = true, 
 
 It is behind an opt-in because the two platforms sound so different, and the API may change.
 
+### Recording in the background
+
+**Android.** When your app leaves the foreground without a foreground service of type `microphone`, the system silences the recorder. The session sees that as an interruption (`PauseReason.Interruption`, API 29+). To keep recording, run a foreground service:
+
+```xml
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+<service android:name=".RecordingService" android:foregroundServiceType="microphone" />
+```
+
+Start it while the app is visible; since Android 14 a microphone service cannot be started from the background.
+
 ### Permissions
 
 The library does not request permission. Check `capture.permission()` and ask before the first `start`:
 
-- **Android:** the library's manifest declares `RECORD_AUDIO`. Request it at runtime as usual.
+- **Android:** the library's manifest declares `RECORD_AUDIO`. Request it at runtime as usual. A build flavour that must not ask for it can drop it with `<uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />`.
 - **iOS:** add `NSMicrophoneUsageDescription` to `Info.plist`. Request with `AVAudioApplication.requestRecordPermission`, or let the first session show the system prompt.
 
 On Android, `AudioCapture()` gets the application context through `androidx.startup`. If your app disables startup initializers, call `AudioCapture(context)` instead.

@@ -1,6 +1,8 @@
 package dev.piotrprus.audiocapture.internal
 
 import dev.piotrprus.audiocapture.AudioCaptureException
+import dev.piotrprus.audiocapture.InputDevice
+import dev.piotrprus.audiocapture.VoiceProcessing
 
 /**
  * The platform half of a session: owns the microphone and hands over interleaved float frames at
@@ -24,6 +26,12 @@ internal interface CaptureEngine {
 
     /** Releases the microphone for good. Must be safe to call more than once. */
     fun stop()
+
+    /** The microphone the system is actually recording from, when it says. */
+    val routedDevice: InputDevice?
+
+    /** The effects that actually took effect, or `null` for none. */
+    val appliedVoiceProcessing: VoiceProcessing?
 
     /** Called from whatever thread the platform uses; implementations must not block. */
     interface Listener {

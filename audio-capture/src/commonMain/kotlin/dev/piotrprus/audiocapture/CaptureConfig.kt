@@ -10,9 +10,17 @@ import kotlin.time.Duration.Companion.milliseconds
  * APIs expect. Set [file] to also record, or set [stream] to `null` to only record.
  */
 public data class CaptureConfig(
-    /** Samples per second, per channel. 16 000, 44 100 and 48 000 work everywhere. */
+    /**
+     * Samples per second, per channel. 16 000, 44 100 and 48 000 work on all current phones;
+     * Android only guarantees 44 100, and [AudioCapture.start] throws if the device refuses a rate.
+     * AAC files are limited to 8 000–48 000.
+     */
     val sampleRate: Int = 16_000,
-    /** 1 (mono) or 2 (stereo). Most phone microphones are mono; stereo duplicates the channel. */
+    /**
+     * 1 (mono) or 2 (stereo). Whether stereo is two real microphones or one duplicated depends on
+     * the device, the input and (on Android) the audio source; [AndroidAudioSource.Camcorder] is
+     * the most likely to give real stereo.
+     */
     val channels: Int = 1,
     /** How much audio each [AudioChunk] holds and how often [CaptureSession.level] updates. */
     val chunkDuration: Duration = 100.milliseconds,
@@ -72,12 +80,21 @@ public enum class AudioEncoder {
     Wav,
 }
 
-/** What happens when the system takes the microphone away mid-session. */
+/**
+ * What happens when the system takes the microphone away mid-session. See [PauseReason.Interruption]
+ * for what counts as one on each platform. Android reports interruptions from API 29.
+ */
 public enum class InterruptionMode {
-    /** Nothing. The session stays [CaptureState.Recording] and receives silence or nothing. */
+    /**
+     * Stay [CaptureState.Recording]. Android keeps delivering the silence the system feeds in;
+     * iOS restarts capture when the system allows it and fails the session when it does not.
+     */
     None,
 
-    /** Move to [CaptureState.Paused] with [PauseReason.Interruption] and wait for [CaptureSession.resume]. */
+    /**
+     * Move to [CaptureState.Paused] with [PauseReason.Interruption], release the microphone, and
+     * wait for [CaptureSession.resume].
+     */
     Pause,
 
     /** Pause, then resume by itself when the system hands the microphone back. */
@@ -100,10 +117,16 @@ public enum class AndroidAudioSource {
     /** Tuned for calls: echo cancellation and gain control where the device provides them. */
     VoiceCommunication,
 
-    /** As raw as the device allows. API 24+, not supported on every device. */
+    /**
+     * As raw as the device allows. Devices that do not support it behave like [Default] without
+     * any error; `AudioManager.getProperty(PROPERTY_SUPPORT_AUDIO_SOURCE_UNPROCESSED)` tells which.
+     */
     Unprocessed,
 
-    /** For live performance. API 29+; falls back to [Mic] below that. */
+    /**
+     * A low-latency path meant for live performance (karaoke, monitoring), not a quality profile.
+     * API 29+; falls back to [Mic] below that.
+     */
     VoicePerformance,
 }
 

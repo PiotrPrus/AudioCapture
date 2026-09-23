@@ -15,3 +15,5 @@ First release.
 - Android audio source selection.
 - iOS audio session category, mode and options, or leave the session to the app.
 - Sample app for Android and iOS.
+- `CaptureSession.inputDevice` (the microphone actually in use) and `CaptureSession.voiceProcessing` (the effects that actually took effect).
+- `stop()` returns `null` and deletes the file when nothing was captured, instead of returning an unplayable file.

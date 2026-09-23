@@ -3,14 +3,14 @@ package dev.piotrprus.audiocapture
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.media.AudioDeviceInfo
 import android.media.AudioManager
-import android.os.Build
 import androidx.startup.Initializer
 import dev.piotrprus.audiocapture.internal.AacFileWriter
+import dev.piotrprus.audiocapture.internal.AacSupport
 import dev.piotrprus.audiocapture.internal.AndroidCaptureEngine
 import dev.piotrprus.audiocapture.internal.DefaultCaptureSession
 import dev.piotrprus.audiocapture.internal.WavFileWriter
+import dev.piotrprus.audiocapture.internal.toInputDevice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -50,22 +50,28 @@ private class AndroidAudioCapture(private val context: Context) : AudioCapture {
             MicPermission.Denied
         }
 
+    /**
+     * Bluetooth headset microphones are left out: recording from them needs the app to route
+     * audio through `AudioManager.setCommunicationDevice`, which this library does not do yet.
+     */
     override fun inputDevices(): List<InputDevice> =
-        audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS).mapNotNull { device ->
-            val type = device.inputType() ?: return@mapNotNull null
-            // Phones list each built-in microphone separately ("bottom", "back"); the address tells them apart.
-            val address = device.address.orEmpty()
-            val name = device.productName.toString() + if (address.isNotBlank()) " ($address)" else ""
-            InputDevice(id = device.id.toString(), name = name, type = type)
-        }
+        audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
+            .mapNotNull { it.toInputDevice() }
+            .filter { it.type != InputDeviceType.Bluetooth }
 
-    override fun isSupported(encoder: AudioEncoder): Boolean = true
+    override fun isSupported(encoder: AudioEncoder, sampleRate: Int, channels: Int): Boolean = when (encoder) {
+        AudioEncoder.AacLc -> AacSupport.supports(sampleRate, channels)
+        AudioEncoder.Wav -> true
+    }
 
     override suspend fun start(config: CaptureConfig): CaptureSession = withContext(Dispatchers.IO) {
         if (permission() != MicPermission.Granted) {
             throw AudioCaptureException("RECORD_AUDIO permission is not granted")
         }
         val writer = config.file?.let { file ->
+            if (!isSupported(file.encoder, config.sampleRate, config.channels)) {
+                throw AudioCaptureException("This device cannot encode ${file.encoder} at ${config.sampleRate} Hz with ${config.channels} channel(s)")
+            }
             try {
                 when (file.encoder) {
                     AudioEncoder.AacLc -> AacFileWriter(file.path, config.sampleRate, config.channels, file.bitRate)
@@ -76,30 +82,5 @@ private class AndroidAudioCapture(private val context: Context) : AudioCapture {
             }
         }
         DefaultCaptureSession(config, AndroidCaptureEngine(context, config), writer).also { it.begin() }
-    }
-
-    /** `null` for inputs that are not microphones: the telephony uplink, tuners, loopback, echo reference. */
-    private fun AudioDeviceInfo.inputType(): InputDeviceType? = when (type) {
-        AudioDeviceInfo.TYPE_BUILTIN_MIC -> InputDeviceType.BuiltIn
-        AudioDeviceInfo.TYPE_WIRED_HEADSET -> InputDeviceType.WiredHeadset
-        AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> InputDeviceType.Bluetooth
-        AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_ACCESSORY -> InputDeviceType.Usb
-        AudioDeviceInfo.TYPE_LINE_ANALOG, AudioDeviceInfo.TYPE_LINE_DIGITAL -> InputDeviceType.LineIn
-        AudioDeviceInfo.TYPE_TELEPHONY, AudioDeviceInfo.TYPE_REMOTE_SUBMIX,
-        AudioDeviceInfo.TYPE_FM_TUNER, AudioDeviceInfo.TYPE_TV_TUNER, TYPE_ECHO_REFERENCE,
-        -> null
-        else -> when {
-            Build.VERSION.SDK_INT >= 26 && type == AudioDeviceInfo.TYPE_USB_HEADSET -> InputDeviceType.Usb
-            Build.VERSION.SDK_INT >= 31 && type == AudioDeviceInfo.TYPE_BLE_HEADSET -> InputDeviceType.Bluetooth
-            else -> InputDeviceType.Other
-        }
-    }
-
-    private companion object {
-        /**
-         * `AudioDeviceInfo.TYPE_ECHO_REFERENCE`, a system API missing from the public SDK. Pixels
-         * list it as an input named after the phone; it carries playback, not the microphone.
-         */
-        const val TYPE_ECHO_REFERENCE = 28
     }
 }

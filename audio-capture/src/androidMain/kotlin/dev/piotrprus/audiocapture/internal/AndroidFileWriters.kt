@@ -2,8 +2,10 @@ package dev.piotrprus.audiocapture.internal
 
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import dev.piotrprus.audiocapture.AudioCaptureException
 import dev.piotrprus.audiocapture.Pcm
 import java.io.File
 import java.io.RandomAccessFile
@@ -28,6 +30,10 @@ internal class WavFileWriter(
 
     override fun write(samples: FloatArray, count: Int) {
         val bytes = Pcm.floatsToInt16(samples, count)
+        // RIFF sizes are 32-bit; past 4 GB the header would wrap and the file read as garbage.
+        if (dataBytes + bytes.size > MAX_DATA_BYTES) {
+            throw AudioCaptureException("WAV files cannot exceed 4 GB; the recording so far is kept")
+        }
         file.write(bytes)
         dataBytes += bytes.size
     }
@@ -44,6 +50,10 @@ internal class WavFileWriter(
     override fun delete() {
         runCatching { close() }
         File(path).delete()
+    }
+
+    private companion object {
+        const val MAX_DATA_BYTES = 0xFFFF_FFFFL - (WavHeader.SIZE - 8)
     }
 }
 
@@ -66,13 +76,14 @@ internal class AacFileWriter(
     private var track = -1
     private var muxerStarted = false
     private var framesQueued = 0L
+    private var samplesMuxed = 0
     private var closed = false
 
     init {
         File(path).parentFile?.mkdirs()
         val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, channels).apply {
             setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
-            setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
+            setInteger(MediaFormat.KEY_BIT_RATE, AacSupport.clampBitRate(bitRate))
             setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, MAX_INPUT_BYTES)
         }
         codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
@@ -90,9 +101,12 @@ internal class AacFileWriter(
         val pcm = Pcm.floatsToInt16(samples, count)
         val frameBytes = channels * 2
         var offset = 0
+        var waits = 0
         while (offset < pcm.size) {
             val index = codec.dequeueInputBuffer(TIMEOUT_US)
+            if (index < 0 && ++waits > MAX_EOS_WAITS) throw AudioCaptureException("The AAC encoder stopped accepting input")
             if (index >= 0) {
+                waits = 0
                 val buffer = codec.getInputBuffer(index) ?: error("No input buffer $index")
                 buffer.clear()
                 val length = minOf(buffer.remaining() / frameBytes * frameBytes, pcm.size - offset)
@@ -108,20 +122,28 @@ internal class AacFileWriter(
     override fun close() {
         if (closed) return
         closed = true
+        var failure: Throwable? = null
         try {
-            var index: Int
-            do {
+            var index = -1
+            for (attempt in 0 until MAX_EOS_WAITS) {
                 index = codec.dequeueInputBuffer(TIMEOUT_US)
-                if (index < 0) drain(endOfStream = false)
-            } while (index < 0)
+                if (index >= 0) break
+                drain(endOfStream = false)
+            }
+            if (index < 0) throw AudioCaptureException("The AAC encoder stopped accepting input")
             codec.queueInputBuffer(index, 0, 0, presentationTimeUs(), MediaCodec.BUFFER_FLAG_END_OF_STREAM)
             drain(endOfStream = true)
+        } catch (e: Throwable) {
+            failure = e
         } finally {
             runCatching { codec.stop() }
             codec.release()
-            if (muxerStarted) runCatching { muxer.stop() }
+            // MediaMuxer.stop() throws when no sample was written; that file would be unplayable.
+            if (muxerStarted) runCatching { muxer.stop() }.onFailure { failure = failure ?: it }
             muxer.release()
         }
+        failure?.let { throw it as? AudioCaptureException ?: AudioCaptureException("Could not finish $path", it) }
+        if (samplesMuxed == 0) throw AudioCaptureException("No audio was encoded into $path")
     }
 
     override fun delete() {
@@ -151,6 +173,7 @@ internal class AacFileWriter(
                         buffer.position(info.offset)
                         buffer.limit(info.offset + info.size)
                         muxer.writeSampleData(track, buffer, info)
+                        samplesMuxed++
                     }
                     codec.releaseOutputBuffer(index, false)
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
@@ -166,4 +189,21 @@ internal class AacFileWriter(
         /** 200 × 10 ms: give up on a codec that never signals end of stream rather than hang stop(). */
         const val MAX_EOS_WAITS = 200
     }
+}
+
+/** What the device's AAC encoder can do, from `MediaCodecList`. */
+internal object AacSupport {
+    private val capabilities: MediaCodecInfo.AudioCapabilities? by lazy {
+        MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+            .filter { it.isEncoder && it.supportedTypes.any { type -> type.equals(MediaFormat.MIMETYPE_AUDIO_AAC, ignoreCase = true) } }
+            .firstNotNullOfOrNull { runCatching { it.getCapabilitiesForType(MediaFormat.MIMETYPE_AUDIO_AAC).audioCapabilities }.getOrNull() }
+    }
+
+    fun supports(sampleRate: Int, channels: Int): Boolean {
+        val audio = capabilities ?: return false
+        return audio.isSampleRateSupported(sampleRate) && audio.maxInputChannelCount >= channels
+    }
+
+    /** Keeps the bit rate inside what the encoder accepts, which otherwise fails configure(). */
+    fun clampBitRate(bitRate: Int): Int = capabilities?.bitrateRange?.clamp(bitRate) ?: bitRate
 }
