@@ -188,13 +188,14 @@ internal class AndroidCaptureEngine(
     }
 
     private fun attachEffects(sessionId: Int) {
-        if (config.echoCancel && AcousticEchoCanceler.isAvailable()) {
+        val wanted = config.voiceProcessing ?: return
+        if (wanted.echoCancel && AcousticEchoCanceler.isAvailable()) {
             AcousticEchoCanceler.create(sessionId)?.let { effects += it.apply { enabled = true } }
         }
-        if (config.noiseSuppress && NoiseSuppressor.isAvailable()) {
+        if (wanted.noiseSuppress && NoiseSuppressor.isAvailable()) {
             NoiseSuppressor.create(sessionId)?.let { effects += it.apply { enabled = true } }
         }
-        if (config.autoGain && AutomaticGainControl.isAvailable()) {
+        if (wanted.autoGain && AutomaticGainControl.isAvailable()) {
             AutomaticGainControl.create(sessionId)?.let { effects += it.apply { enabled = true } }
         }
     }

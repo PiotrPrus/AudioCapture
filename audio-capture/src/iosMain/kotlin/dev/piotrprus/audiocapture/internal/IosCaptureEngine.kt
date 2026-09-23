@@ -85,9 +85,9 @@ internal class IosCaptureEngine(private val config: CaptureConfig) : CaptureEngi
         if (config.ios.manageAudioSession) configureSession()
         val created = AVAudioEngine()
         engine = created
-        if (config.echoCancel || config.noiseSuppress || config.autoGain) {
+        config.voiceProcessing?.takeIf { it.echoCancel || it.noiseSuppress || it.autoGain }?.let { wanted ->
             nsCheck("Could not enable voice processing") { created.inputNode.setVoiceProcessingEnabled(true, it) }
-            created.inputNode.setVoiceProcessingAGCEnabled(config.autoGain)
+            created.inputNode.setVoiceProcessingAGCEnabled(wanted.autoGain)
         }
         installTap(created)
         observe(created)

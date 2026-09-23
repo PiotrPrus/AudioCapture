@@ -11,7 +11,7 @@ First release.
 - `LevelNormalizer`: an adaptive 0..1 level for meters and visuals that behaves the same on hot iOS inputs and quieter Android ones.
 - Interruptions (calls, Siri, another app taking the microphone) with `InterruptionMode.None`, `Pause` or `PauseResume`.
 - Input device listing and selection.
-- Echo cancellation, noise suppression and automatic gain control.
+- Experimental echo cancellation, noise suppression and automatic gain control (`VoiceProcessing`, opt-in with `@ExperimentalVoiceProcessing`). On iOS it runs Apple's voice processing, which noticeably changes the tone of the voice.
 - Android audio source selection.
 - iOS audio session category, mode and options, or leave the session to the app.
 - Sample app for Android and iOS.

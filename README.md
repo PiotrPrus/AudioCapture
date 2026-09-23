@@ -7,7 +7,8 @@ Microphone capture for Kotlin Multiplatform, on Android and iOS.
 - **Both at once** from one microphone: send audio to a speech-to-text API while keeping the file.
 - Live **levels** in dBFS, plus a normaliser that makes meters look the same on every device.
 - **Pause and resume**, including after phone calls and Siri, with a choice of what interruptions do.
-- **Input devices**, **echo cancellation**, **noise suppression**, **gain control**, the Android audio source and the iOS audio session, all from common code.
+- **Input devices**, the Android audio source and the iOS audio session, all from common code.
+- Experimental **echo cancellation**, **noise suppression** and **gain control**.
 
 📖 **[API documentation](https://piotrprus.github.io/AudioCapture/)**
 
@@ -76,9 +77,6 @@ CaptureConfig(
     stream = StreamOutput(encoding = PcmEncoding.Float32),
     file = FileOutput("$dir/take.wav", AudioEncoder.Wav),
     device = capture.inputDevices().first { it.type == InputDeviceType.Usb },
-    echoCancel = true,
-    noiseSuppress = true,
-    autoGain = false,
     interruption = InterruptionMode.PauseResume,
     android = AndroidOptions(audioSource = AndroidAudioSource.Unprocessed),
     ios = IosOptions(mode = IosSessionMode.Measurement, mixWithOthers = true),
@@ -90,10 +88,21 @@ CaptureConfig(
 | Streaming | `AudioRecord`, float with a 16-bit fallback | `AVAudioEngine` tap, resampled by `AVAudioConverter` |
 | AAC file | `MediaCodec` + `MediaMuxer` | `ExtAudioFile` |
 | WAV file | 16-bit PCM | 16-bit PCM |
-| Echo cancellation, noise suppression, gain control | `AcousticEchoCanceler`, `NoiseSuppressor`, `AutomaticGainControl` where the device has them | Voice processing on the input node; any of the three switches it on |
 | Interruptions | Recording callback `isClientSilenced` (API 29+) | `AVAudioSession` interruption notifications |
 | Route changes | Handled by the system | Tap rebuilt for the new input format |
 | Input devices | `AudioManager.getDevices` + `setPreferredDevice` | `availableInputs` + `setPreferredInput` |
+
+### Voice processing (experimental)
+
+```kotlin
+@OptIn(ExperimentalVoiceProcessing::class)
+val config = CaptureConfig(voiceProcessing = VoiceProcessing(echoCancel = true, noiseSuppress = true))
+```
+
+- **Android:** uses `AcousticEchoCanceler`, `NoiseSuppressor` and `AutomaticGainControl` where the device provides them. Usually subtle.
+- **iOS:** switches on Apple's voice processing on the input node, which always does echo cancellation and noise suppression together. It is tuned for calls, so the voice sounds noticeably different, like a phone call.
+
+It is behind an opt-in because the two platforms sound so different, and the API may change.
 
 ### Permissions
 

@@ -23,16 +23,10 @@ public data class CaptureConfig(
     /** Preferred microphone, from [AudioCapture.inputDevices]. `null` is the system default. */
     val device: InputDevice? = null,
     /**
-     * Platform echo cancellation.
-     *
-     * On iOS, [echoCancel], [noiseSuppress] and [autoGain] all switch on Apple's voice processing,
-     * which does echo cancellation and noise suppression together; they cannot be split there.
+     * Echo cancellation, noise suppression and gain control, or `null` for the unprocessed signal.
+     * Experimental: see [ExperimentalVoiceProcessing].
      */
-    val echoCancel: Boolean = false,
-    /** Platform noise suppression. See [echoCancel] for iOS. */
-    val noiseSuppress: Boolean = false,
-    /** Platform automatic gain control. See [echoCancel] for iOS. */
-    val autoGain: Boolean = false,
+    val voiceProcessing: VoiceProcessing? = null,
     val interruption: InterruptionMode = InterruptionMode.Pause,
     val android: AndroidOptions = AndroidOptions(),
     val ios: IosOptions = IosOptions(),

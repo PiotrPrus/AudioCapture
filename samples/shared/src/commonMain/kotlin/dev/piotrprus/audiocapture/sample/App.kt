@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalVoiceProcessing::class)
+
 package dev.piotrprus.audiocapture.sample
 
 import androidx.compose.foundation.background
@@ -39,10 +41,12 @@ import dev.piotrprus.audiocapture.AudioEncoder
 import dev.piotrprus.audiocapture.CaptureConfig
 import dev.piotrprus.audiocapture.CaptureSession
 import dev.piotrprus.audiocapture.CaptureState
+import dev.piotrprus.audiocapture.ExperimentalVoiceProcessing
 import dev.piotrprus.audiocapture.FileOutput
 import dev.piotrprus.audiocapture.LevelNormalizer
 import dev.piotrprus.audiocapture.Recording
 import dev.piotrprus.audiocapture.StreamOutput
+import dev.piotrprus.audiocapture.VoiceProcessing
 import kotlinx.coroutines.launch
 import kotlin.time.Duration
 
@@ -87,7 +91,7 @@ fun App(recordingsDir: String) {
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Switch(checked = voiceProcessing, onCheckedChange = { voiceProcessing = it })
-                    Text("Echo cancellation + noise suppression")
+                    Text("Voice processing (experimental)")
                 }
                 Button(onClick = {
                     error = null
@@ -100,8 +104,7 @@ fun App(recordingsDir: String) {
                             val extension = if (encoder == AudioEncoder.Wav) "wav" else "m4a"
                             FileOutput(path = "$recordingsDir/capture.$extension", encoder = encoder)
                         },
-                        echoCancel = voiceProcessing,
-                        noiseSuppress = voiceProcessing,
+                        voiceProcessing = if (voiceProcessing) VoiceProcessing() else null,
                     )
                     scope.launch {
                         try {
