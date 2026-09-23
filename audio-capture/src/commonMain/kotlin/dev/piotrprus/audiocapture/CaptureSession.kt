@@ -6,6 +6,9 @@ import kotlinx.coroutines.flow.StateFlow
 /** One run of the microphone, from [AudioCapture.start] to [stop] or [cancel]. */
 public interface CaptureSession {
 
+    /** What this session was started with. */
+    public val config: CaptureConfig
+
     /**
      * The format [chunks] are delivered in.
      *
@@ -19,6 +22,12 @@ public interface CaptureSession {
 
     /** Loudness of the most recent chunk; updated once per [CaptureConfig.chunkDuration]. */
     public val level: StateFlow<AudioLevel>
+
+    /**
+     * [level] as 0..1, ready for a meter or an animation: run through a [LevelNormalizer] so
+     * ordinary speech moves it well on every device. 0 while paused or stopped.
+     */
+    public val normalizedLevel: StateFlow<Float>
 
     /**
      * The microphone the system is actually recording from, or `null` when it does not say.
@@ -36,9 +45,9 @@ public interface CaptureSession {
     /**
      * Raw PCM, one chunk per [CaptureConfig.chunkDuration].
      *
-     * Empty when [CaptureConfig.stream] is `null`. Can be collected once; a second collector fails
+     * Empty when [CaptureConfig.pcm] is `null`. Can be collected once; a second collector fails
      * with [IllegalStateException] (use `shareIn` to fan out). Chunks are queued until collected,
-     * up to [StreamOutput.bufferedChunks], after which the oldest are dropped. The
+     * up to [PcmOutput.bufferedChunks], after which the oldest are dropped. The
      * flow completes when the session stops, or fails with [AudioCaptureException] when the
      * microphone fails.
      */

@@ -11,7 +11,7 @@ import dev.piotrprus.audiocapture.InterruptionMode
 import dev.piotrprus.audiocapture.PauseReason
 import dev.piotrprus.audiocapture.PcmEncoding
 import dev.piotrprus.audiocapture.Recording
-import dev.piotrprus.audiocapture.StreamOutput
+import dev.piotrprus.audiocapture.PcmOutput
 import dev.piotrprus.audiocapture.VoiceProcessing
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -124,7 +124,7 @@ class DefaultCaptureSessionTest {
     @Test
     fun chunks_use_the_requested_encoding() = runTest {
         val engine = FakeEngine()
-        val session = session(base.copy(stream = StreamOutput(PcmEncoding.Float32)), engine)
+        val session = session(base.copy(pcm = PcmOutput(PcmEncoding.Float32)), engine)
 
         engine.emit(80, value = 0.25f)
         advanceUntilIdle()
@@ -144,6 +144,21 @@ class DefaultCaptureSessionTest {
         advanceUntilIdle()
 
         assertEquals(0.5f, session.level.value.peak)
+        session.stop()
+    }
+
+    @Test
+    fun normalized_level_follows_chunks_and_resets_on_pause() = runTest {
+        val engine = FakeEngine()
+        val session = session(engine = engine)
+
+        engine.emit(80, value = 0.2f)
+        advanceUntilIdle()
+        assertEquals(0.2f / dev.piotrprus.audiocapture.LevelNormalizer.DEFAULT_FLOOR, session.normalizedLevel.value, 0.001f)
+
+        session.pause()
+        advanceUntilIdle()
+        assertEquals(0f, session.normalizedLevel.value)
         session.stop()
     }
 
@@ -393,7 +408,7 @@ class DefaultCaptureSessionTest {
     @Test
     fun file_only_session_has_no_chunks() = runTest {
         val engine = FakeEngine()
-        val session = session(base.copy(stream = null, file = FileOutput("/tmp/a.m4a")), engine, FakeWriter())
+        val session = session(base.copy(pcm = null, file = FileOutput("/tmp/a.m4a")), engine, FakeWriter())
 
         engine.emit(160)
         advanceUntilIdle()
@@ -404,7 +419,7 @@ class DefaultCaptureSessionTest {
 
     @Test
     fun config_rejects_no_output() {
-        assertFailsWith<IllegalArgumentException> { CaptureConfig(stream = null, file = null) }
+        assertFailsWith<IllegalArgumentException> { CaptureConfig(pcm = null, file = null) }
     }
 
     @Test

@@ -45,6 +45,19 @@ class PcmTest {
     }
 
     @Test
+    fun chunk_level_matches_its_samples() {
+        val format = PcmFormat(sampleRate = 8_000, channels = 1, encoding = PcmEncoding.Float32)
+        val chunk = AudioChunk(Pcm.floatsToFloat32(floatArrayOf(0.5f, -0.5f)), format, 0.milliseconds)
+        assertEquals(AudioLevel(peak = 0.5f, rms = 0.5f), chunk.level())
+    }
+
+    @Test
+    fun encoder_follows_the_file_extension() {
+        assertEquals(AudioEncoder.Wav, FileOutput("/a/take.WAV").encoder)
+        assertEquals(AudioEncoder.AacLc, FileOutput("/a/memo.m4a").encoder)
+    }
+
+    @Test
     fun wav_header_describes_the_data() {
         val header = WavHeader.build(sampleRate = 16_000, channels = 1, dataBytes = 32_000)
         assertEquals("RIFF", header.decodeToString(0, 4))

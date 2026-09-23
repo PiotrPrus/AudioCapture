@@ -16,6 +16,11 @@ First release.
 - iOS audio session category, mode (`Default`, `Measurement`, `VoiceChat`), Bluetooth input (`Off`, `Hfp`, `HighQuality` on iOS 26), and whether pausing deactivates the session; or leave the session to the app.
 - iOS asks for microphone permission on the first `start()` and fails if declined, rather than recording silence.
 - iOS recovers from media services resets and route changes, including those that arrive during an interruption.
-- Sample app for Android and iOS.
+- `AudioCapture.record(fileName)`: permission, storage and recording in one call.
+- `requestPermission()` on both platforms; `start()` asks when needed.
+- `recordingPath(fileName)` for a private storage location; `FileOutput` picks the encoder from the extension.
+- `CaptureSession.normalizedLevel` (0..1 for UI), `CaptureSession.config`, and `AudioChunk.level()`.
+- `CaptureConfig.pcm` / `PcmOutput` name the raw-audio output.
+- Sample app for Android and iOS, with a minimal Quick start screen.
 - `CaptureSession.inputDevice` (the microphone actually in use) and `CaptureSession.voiceProcessing` (the effects that actually took effect).
 - `stop()` returns `null` and deletes the file when nothing was captured, instead of returning an unplayable file.

@@ -43,9 +43,8 @@ import dev.piotrprus.audiocapture.CaptureSession
 import dev.piotrprus.audiocapture.CaptureState
 import dev.piotrprus.audiocapture.ExperimentalVoiceProcessing
 import dev.piotrprus.audiocapture.FileOutput
-import dev.piotrprus.audiocapture.LevelNormalizer
 import dev.piotrprus.audiocapture.Recording
-import dev.piotrprus.audiocapture.StreamOutput
+import dev.piotrprus.audiocapture.PcmOutput
 import dev.piotrprus.audiocapture.VoiceProcessing
 import kotlinx.coroutines.launch
 import kotlin.time.Duration
@@ -58,17 +57,8 @@ private enum class Mode(val label: String, val stream: Boolean, val encoder: Aud
 }
 
 @Composable
-fun App(recordingsDir: String) {
-    val capture = remember { AudioCapture() }
-    val scope = rememberCoroutineScope()
-    var mode by remember { mutableStateOf(Mode.Both) }
-    var voiceProcessing by remember { mutableStateOf(false) }
-    var session by remember { mutableStateOf<CaptureSession?>(null) }
-    var recording by remember { mutableStateOf<Recording?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var chunkCount by remember { mutableIntStateOf(0) }
-    var streamed by remember { mutableStateOf(Duration.ZERO) }
-
+fun App() {
+    var fullDemo by remember { mutableStateOf(false) }
     MaterialTheme {
         Column(
             modifier = Modifier
@@ -80,60 +70,82 @@ fun App(recordingsDir: String) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text("AudioCapture", style = MaterialTheme.typography.headlineMedium)
-            Text("Permission: ${capture.permission()}", style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = !fullDemo, onClick = { fullDemo = false }, label = { Text("Quick start") })
+                FilterChip(selected = fullDemo, onClick = { fullDemo = true }, label = { Text("Everything") })
+            }
+            if (fullDemo) FullDemo() else QuickStart()
+        }
+    }
+}
 
-            val active = session
-            if (active == null) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Mode.entries.forEach { option ->
-                        FilterChip(selected = mode == option, onClick = { mode = option }, label = { Text(option.label) })
-                    }
+/** Every mode and option: stream, AAC, WAV, both at once, voice processing, pause and resume. */
+@Composable
+private fun FullDemo() {
+    val capture = remember { AudioCapture() }
+    val scope = rememberCoroutineScope()
+    var mode by remember { mutableStateOf(Mode.Both) }
+    var voiceProcessing by remember { mutableStateOf(false) }
+    var session by remember { mutableStateOf<CaptureSession?>(null) }
+    var recording by remember { mutableStateOf<Recording?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var chunkCount by remember { mutableIntStateOf(0) }
+    var streamed by remember { mutableStateOf(Duration.ZERO) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text("Permission: ${capture.permission()}", style = MaterialTheme.typography.bodyMedium)
+
+        val active = session
+        if (active == null) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Mode.entries.forEach { option ->
+                    FilterChip(selected = mode == option, onClick = { mode = option }, label = { Text(option.label) })
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Switch(checked = voiceProcessing, onCheckedChange = { voiceProcessing = it })
-                    Text("Voice processing (experimental)")
-                }
-                Button(onClick = {
-                    error = null
-                    recording = null
-                    chunkCount = 0
-                    streamed = Duration.ZERO
-                    val config = CaptureConfig(
-                        stream = if (mode.stream) StreamOutput() else null,
-                        file = mode.encoder?.let { encoder ->
-                            val extension = if (encoder == AudioEncoder.Wav) "wav" else "m4a"
-                            FileOutput(path = "$recordingsDir/capture.$extension", encoder = encoder)
-                        },
-                        voiceProcessing = if (voiceProcessing) VoiceProcessing() else null,
-                    )
-                    scope.launch {
-                        try {
-                            session = capture.start(config)
-                        } catch (e: AudioCaptureException) {
-                            error = e.message
-                        }
-                    }
-                }) { Text("Start") }
-                Text("Inputs", style = MaterialTheme.typography.titleMedium)
-                capture.inputDevices().forEach { Text("• ${it.name} (${it.type})") }
-            } else {
-                ActiveSession(
-                    session = active,
-                    onChunk = { chunkCount++; streamed += it },
-                    onFinished = { result, failure ->
-                        recording = result
-                        error = failure
-                        session = null
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Switch(checked = voiceProcessing, onCheckedChange = { voiceProcessing = it })
+                Text("Voice processing (experimental)")
+            }
+            Button(onClick = {
+                error = null
+                recording = null
+                chunkCount = 0
+                streamed = Duration.ZERO
+                val config = CaptureConfig(
+                    pcm = if (mode.stream) PcmOutput() else null,
+                    file = mode.encoder?.let { encoder ->
+                        val extension = if (encoder == AudioEncoder.Wav) "wav" else "m4a"
+                        FileOutput(capture.recordingPath("capture.$extension"))
                     },
+                    voiceProcessing = if (voiceProcessing) VoiceProcessing() else null,
                 )
-                Text("Chunks: $chunkCount · streamed: $streamed")
-            }
+                scope.launch {
+                    try {
+                        session = capture.start(config)
+                    } catch (e: AudioCaptureException) {
+                        error = e.message
+                    }
+                }
+            }) { Text("Start") }
+            Text("Inputs", style = MaterialTheme.typography.titleMedium)
+            capture.inputDevices().forEach { Text("• ${it.name} (${it.type})") }
+        } else {
+            ActiveSession(
+                session = active,
+                onChunk = { chunkCount++; streamed += it },
+                onFinished = { result, failure ->
+                    recording = result
+                    error = failure
+                    session = null
+                },
+            )
+            Text("Chunks: $chunkCount · streamed: $streamed")
+        }
 
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            recording?.let { finished ->
-                Text("Saved ${finished.durationMillis} ms to ${finished.path}")
-                OutlinedButton(onClick = { play(finished.path) }) { Text("Play") }
-            }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        recording?.let { finished ->
+            Text("Saved ${finished.durationMillis} ms to ${finished.path}")
+            OutlinedButton(onClick = { play(finished.path) }) { Text("Play") }
         }
     }
 }
@@ -147,7 +159,7 @@ private fun ActiveSession(
     val scope = rememberCoroutineScope()
     val state by session.state.collectAsState()
     val level by session.level.collectAsState()
-    val normalizer = remember(session) { LevelNormalizer() }
+    val meter by session.normalizedLevel.collectAsState()
 
     LaunchedEffect(session) {
         try {
@@ -159,7 +171,6 @@ private fun ActiveSession(
 
     Text("State: $state")
     Text("Peak ${level.peakDbfs.toInt()} dBFS · RMS ${level.rmsDbfs.toInt()} dBFS")
-    val meter = remember(level) { normalizer.normalize(level, CaptureConfig().chunkDuration) }
     Box(
         Modifier
             .fillMaxWidth()

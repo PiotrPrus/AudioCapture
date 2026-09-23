@@ -16,13 +16,25 @@ import kotlinx.coroutines.flow.flow
  */
 public interface AudioCapture {
 
-    /**
-     * Current microphone permission.
-     *
-     * On iOS, [start] asks when the user has never been asked, and fails if they decline. On
-     * Android, request `RECORD_AUDIO` through the usual runtime-permission flow before [start].
-     */
+    /** Current microphone permission, without asking. */
     public fun permission(): MicPermission
+
+    /**
+     * Shows the system permission dialog if needed and returns the answer. Returns at once when
+     * permission was already granted, or when the user has already refused for good.
+     *
+     * [start] calls this for you, so you only need it to ask at a moment of your choosing. On
+     * Android the dialog needs the app in the foreground; from the background this returns
+     * [MicPermission.Denied].
+     */
+    public suspend fun requestPermission(): MicPermission
+
+    /**
+     * An absolute path for [fileName] in the app's private storage (Android `filesDir`, iOS
+     * Application Support), in a `recordings` folder that is created if needed. Use it for
+     * [FileOutput.path].
+     */
+    public fun recordingPath(fileName: String): String
 
     /**
      * Microphones the system can record from right now.
@@ -41,14 +53,29 @@ public interface AudioCapture {
     /**
      * Opens the microphone and starts capturing with [config].
      *
-     * The session is recording when this returns. Call [CaptureSession.stop] to finish it and get
-     * the file, or [CaptureSession.cancel] to discard it.
+     * Asks for microphone permission first if it has not been granted. The session is recording
+     * when this returns. Call [CaptureSession.stop] to finish it and get the file, or
+     * [CaptureSession.cancel] to discard it.
      *
-     * @throws AudioCaptureException if the microphone cannot be opened: no permission, the
+     * @throws AudioCaptureException if the microphone cannot be opened: permission refused, the
      *   requested format is not supported, or another app holds the input exclusively.
      */
     public suspend fun start(config: CaptureConfig = CaptureConfig()): CaptureSession
 }
+
+/**
+ * The shortest way to record: asks for permission if needed and starts recording [fileName]
+ * (`.m4a` for AAC, `.wav` for WAV) into [AudioCapture.recordingPath]. Chunks and levels are on
+ * the returned session for live visuals; call [CaptureSession.stop] to get the file.
+ *
+ * ```
+ * val session = AudioCapture().record("hello.m4a")
+ * // ... later
+ * val recording = session.stop()
+ * ```
+ */
+public suspend fun AudioCapture.record(fileName: String = "recording.m4a"): CaptureSession =
+    start(CaptureConfig(file = FileOutput(recordingPath(fileName))))
 
 /**
  * Streams raw PCM for as long as the flow is collected.
@@ -58,7 +85,7 @@ public interface AudioCapture {
  * when you also need a recording.
  */
 public fun AudioCapture.stream(config: CaptureConfig = CaptureConfig()): Flow<AudioChunk> = flow {
-    val session = start(config.copy(file = null))
+    val session = start(config.copy(file = null, pcm = config.pcm ?: PcmOutput()))
     try {
         session.chunks.collect { emit(it) }
     } finally {

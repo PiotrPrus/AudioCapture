@@ -4,6 +4,7 @@ Microphone capture for Kotlin Multiplatform on Android and iOS.
 
 Start with [AudioCapture][dev.piotrprus.audiocapture.AudioCapture]:
 
+- [record][dev.piotrprus.audiocapture.record] asks for permission and records a file in one call.
 - [stream][dev.piotrprus.audiocapture.stream] gives a cold `Flow` of raw PCM
   [AudioChunk][dev.piotrprus.audiocapture.AudioChunk]s. The microphone is open only while the flow
   is collected.
@@ -19,8 +20,8 @@ mono PCM16 in 100 ms chunks, suit speech-to-text.
 ```kotlin
 val capture = AudioCapture()
 
-val session = capture.start(CaptureConfig(file = FileOutput("$dir/memo.m4a")))
-launch { session.chunks.collect { speechApi.send(it.bytes) } }
+val session = capture.record("memo.m4a") // asks for the microphone the first time
+launch { session.normalizedLevel.collect { meter = it } }
 // ...
 val recording = session.stop()
 ```
