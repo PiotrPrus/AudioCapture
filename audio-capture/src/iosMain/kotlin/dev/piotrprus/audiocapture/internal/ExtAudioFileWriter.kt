@@ -31,7 +31,9 @@ import platform.AudioToolbox.kAudioFileFlags_EraseFile
 import platform.AudioToolbox.kAudioFileM4AType
 import platform.AudioToolbox.kAudioFileWAVEType
 import platform.AudioToolbox.kExtAudioFileProperty_AudioConverter
+import platform.AudioToolbox.kAppleSoftwareAudioCodecManufacturer
 import platform.AudioToolbox.kExtAudioFileProperty_ClientDataFormat
+import platform.AudioToolbox.kExtAudioFileProperty_CodecManufacturer
 import platform.AudioToolbox.kExtAudioFileProperty_ConverterConfig
 import platform.CoreAudioTypes.AudioBufferList
 import platform.CoreAudioTypes.AudioStreamBasicDescription
@@ -113,6 +115,13 @@ internal class ExtAudioFileWriter(
             }
             val created = ref.value ?: throw AudioCaptureException("Could not create $path")
 
+            // The software encoder keeps working through interruptions, where a hardware codec
+            // can be taken away mid-file. Must be set before the client format.
+            if (encoder == AudioEncoder.AacLc) {
+                val manufacturer = alloc<UIntVar>().apply { value = kAppleSoftwareAudioCodecManufacturer }
+                ExtAudioFileSetProperty(created, kExtAudioFileProperty_CodecManufacturer, sizeOf<UIntVar>().toUInt(), manufacturer.ptr)
+            }
+
             val clientFormat = alloc<AudioStreamBasicDescription>().apply {
                 mSampleRate = sampleRate.toDouble()
                 mChannelsPerFrame = channels.toUInt()
@@ -167,6 +176,9 @@ internal class ExtAudioFileWriter(
      * even that is higher. The ceiling depends on sample rate and channels (16 kHz mono tops out
      * well below 64 kbit/s), and an unsupported value is not rejected when set: the encoder takes
      * it and then fails every write.
+     *
+     * Every early return leaves the encoder's own default bit rate in place, which always works;
+     * only a value that was never validated can break the file.
      */
     private fun setBitRate(target: ExtAudioFileRef, bitRate: Int) = memScoped {
         val converter = alloc<AudioConverterRefVar>()

@@ -79,7 +79,7 @@ CaptureConfig(
     device = capture.inputDevices().first { it.type == InputDeviceType.Usb },
     interruption = InterruptionMode.PauseResume,
     android = AndroidOptions(audioSource = AndroidAudioSource.Unprocessed),
-    ios = IosOptions(mode = IosSessionMode.Measurement, mixWithOthers = true),
+    ios = IosOptions(mode = IosSessionMode.Measurement, bluetoothInput = IosBluetoothInput.Hfp),
 )
 ```
 
@@ -100,7 +100,7 @@ val config = CaptureConfig(voiceProcessing = VoiceProcessing(echoCancel = true, 
 ```
 
 - **Android:** uses `AcousticEchoCanceler`, `NoiseSuppressor` and `AutomaticGainControl` where the device provides them. Usually subtle.
-- **iOS:** switches on Apple's voice processing on the input node, which always does echo cancellation and noise suppression together. It is tuned for calls, so the voice sounds noticeably different, like a phone call.
+- **iOS:** switches on Apple's voice processing on the input node, which always does echo cancellation and noise suppression together. It is tuned for calls, so the voice sounds noticeably different, like a phone call. Pass `applyOnIos = false` to keep the Android effects only, and `iosDucking` to control how much other apps' audio is lowered.
 
 It is behind an opt-in because the two platforms sound so different, and the API may change.
 
@@ -115,6 +115,13 @@ It is behind an opt-in because the two platforms sound so different, and the API
 ```
 
 Start it while the app is visible; since Android 14 a microphone service cannot be started from the background.
+
+**iOS.** Add the `audio` background mode to `Info.plist`, and start the session while the app is in the foreground. Without it, capture stops when the app is suspended.
+
+```xml
+<key>UIBackgroundModes</key>
+<array><string>audio</string></array>
+```
 
 ### Permissions
 

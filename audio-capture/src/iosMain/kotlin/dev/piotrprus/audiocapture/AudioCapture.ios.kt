@@ -3,6 +3,7 @@ package dev.piotrprus.audiocapture
 import dev.piotrprus.audiocapture.internal.DefaultCaptureSession
 import dev.piotrprus.audiocapture.internal.ExtAudioFileWriter
 import dev.piotrprus.audiocapture.internal.IosCaptureEngine
+import dev.piotrprus.audiocapture.internal.IosPermission
 import dev.piotrprus.audiocapture.internal.toInputDevice
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.Dispatchers
@@ -12,8 +13,6 @@ import platform.AVFAudio.AVAudioSession
 import platform.AVFAudio.AVAudioSessionCategoryPlayAndRecord
 import platform.AVFAudio.AVAudioSessionCategoryRecord
 import platform.AVFAudio.AVAudioSessionPortDescription
-import platform.AVFAudio.AVAudioSessionRecordPermissionDenied
-import platform.AVFAudio.AVAudioSessionRecordPermissionGranted
 import platform.AVFAudio.availableInputs
 
 public actual fun AudioCapture(): AudioCapture = IosAudioCapture()
@@ -23,25 +22,28 @@ private class IosAudioCapture : AudioCapture {
 
     private val session get() = AVAudioSession.sharedInstance()
 
-    override fun permission(): MicPermission = when (session.recordPermission) {
-        AVAudioSessionRecordPermissionGranted -> MicPermission.Granted
-        AVAudioSessionRecordPermissionDenied -> MicPermission.Denied
-        else -> MicPermission.NotDetermined
-    }
+    override fun permission(): MicPermission = IosPermission.current()
 
     /**
-     * iOS only lists inputs while the audio session category can record, so a category that
-     * cannot (the default, `soloAmbient`) is switched to `playAndRecord` first. That does not
-     * activate the session or interrupt other audio.
+     * iOS only lists inputs while the audio session category can record. When it cannot (the
+     * default, `soloAmbient`), the category is switched to `playAndRecord` just long enough to
+     * read the list and then put back with its original mode and options.
      */
     override fun inputDevices(): List<InputDevice> {
         val category = session.category
-        if (category != AVAudioSessionCategoryRecord && category != AVAudioSessionCategoryPlayAndRecord) {
-            session.setCategory(AVAudioSessionCategoryPlayAndRecord, null)
+        val mode = session.mode
+        val options = session.categoryOptions
+        val canRecord = category == AVAudioSessionCategoryRecord || category == AVAudioSessionCategoryPlayAndRecord
+        if (!canRecord) session.setCategory(AVAudioSessionCategoryPlayAndRecord, null)
+        try {
+            return session.availableInputs.orEmpty()
+                .filterIsInstance<AVAudioSessionPortDescription>()
+                .map { it.toInputDevice() }
+        } finally {
+            if (!canRecord && category != null) {
+                session.setCategory(category, mode, options, null)
+            }
         }
-        return session.availableInputs.orEmpty()
-            .filterIsInstance<AVAudioSessionPortDescription>()
-            .map { it.toInputDevice() }
     }
 
     override fun isSupported(encoder: AudioEncoder, sampleRate: Int, channels: Int): Boolean = when (encoder) {
@@ -50,7 +52,8 @@ private class IosAudioCapture : AudioCapture {
     }
 
     override suspend fun start(config: CaptureConfig): CaptureSession = withContext(Dispatchers.IO) {
-        if (permission() == MicPermission.Denied) {
+        // Without permission iOS delivers silence rather than an error, so never start without it.
+        if (IosPermission.request() != MicPermission.Granted) {
             throw AudioCaptureException("Microphone permission was denied")
         }
         val writer = config.file?.let { file ->
