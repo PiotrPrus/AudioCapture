@@ -40,9 +40,21 @@ public interface AudioCapture {
      * Microphones the system can record from right now.
      *
      * Pass one as [CaptureConfig.device] to prefer it over the system default. The list changes
-     * as headsets and USB devices come and go, so read it when you need it rather than caching it.
+     * as headsets and USB devices come and go, so read it when you need it rather than caching it,
+     * or collect [inputDevicesFlow].
+     *
+     * Bluetooth headsets are listed, one entry per connected headset. Recording from one switches
+     * it to its call profile, which records at 8–16 kHz. On Android below API 31 only the headset
+     * the system treats as active can record, so only that one is listed.
      */
     public fun inputDevices(): List<InputDevice>
+
+    /**
+     * [inputDevices], emitted once on collection and again whenever a microphone connects or
+     * disconnects. Equal consecutive lists are not repeated. Use it to keep a source picker
+     * current.
+     */
+    public fun inputDevicesFlow(): Flow<List<InputDevice>>
 
     /**
      * Whether this device can write [encoder] files at [sampleRate] with [channels]. AAC is limited

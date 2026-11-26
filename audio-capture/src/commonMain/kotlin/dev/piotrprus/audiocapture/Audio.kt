@@ -86,11 +86,28 @@ public data class AudioLevel(
     }
 }
 
+/**
+ * A microphone the system can record from.
+ *
+ * Several devices of the same [type] can be connected at once, for example two Bluetooth
+ * headsets. Each is its own [InputDevice] with its own [id] and [stableKey]. Their [name]s can
+ * match (two pairs of the same headphones), so apps that show them side by side should tell them
+ * apart themselves.
+ */
 public data class InputDevice(
-    /** Platform identifier: the `AudioDeviceInfo` id on Android, the port UID on iOS. */
+    /**
+     * Platform identifier for this connection: the `AudioDeviceInfo` id on Android, the port UID
+     * on iOS. On Android it changes when a device disconnects and connects again.
+     */
     val id: String,
     val name: String,
     val type: InputDeviceType,
+    /**
+     * Identifies the same physical device across reconnects, for saving the user's choice: the
+     * device type and address on Android (the Bluetooth address for Bluetooth devices), the port
+     * UID on iOS. A [CaptureConfig.device] whose [id] is gone is matched again by this key.
+     */
+    val stableKey: String = id,
 )
 
 public enum class InputDeviceType {
@@ -99,5 +116,8 @@ public enum class InputDeviceType {
     Bluetooth,
     Usb,
     LineIn,
+
+    /** CarPlay audio on iOS. On Android a car connected over Bluetooth is [Bluetooth], named after the car. */
+    Car,
     Other,
 }

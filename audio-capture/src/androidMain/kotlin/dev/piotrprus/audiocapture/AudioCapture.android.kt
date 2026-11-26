@@ -1,7 +1,11 @@
 package dev.piotrprus.audiocapture
 
 import android.content.Context
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.os.Handler
+import android.os.Looper
 import androidx.startup.Initializer
 import dev.piotrprus.audiocapture.internal.AacFileWriter
 import dev.piotrprus.audiocapture.internal.AacSupport
@@ -12,6 +16,11 @@ import dev.piotrprus.audiocapture.internal.WavFileWriter
 import dev.piotrprus.audiocapture.internal.toInputDevice
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
 
 public actual fun AudioCapture(): AudioCapture = AudioCapture(
@@ -54,14 +63,25 @@ private class AndroidAudioCapture(private val context: Context) : AudioCapture {
         return File(directory, fileName).absolutePath
     }
 
-    /**
-     * Bluetooth headset microphones are left out: recording from them needs the app to route
-     * audio through `AudioManager.setCommunicationDevice`, which this library does not do yet.
-     */
     override fun inputDevices(): List<InputDevice> =
         audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
             .mapNotNull { it.toInputDevice() }
-            .filter { it.type != InputDeviceType.Bluetooth }
+
+    override fun inputDevicesFlow(): Flow<List<InputDevice>> = callbackFlow {
+        val callback = object : AudioDeviceCallback() {
+            // Also called once on registration with the devices already connected.
+            override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
+                trySend(inputDevices())
+            }
+
+            override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+                trySend(inputDevices())
+            }
+        }
+        trySend(inputDevices())
+        audioManager.registerAudioDeviceCallback(callback, Handler(Looper.getMainLooper()))
+        awaitClose { audioManager.unregisterAudioDeviceCallback(callback) }
+    }.conflate().distinctUntilChanged()
 
     override fun isSupported(encoder: AudioEncoder, sampleRate: Int, channels: Int): Boolean = when (encoder) {
         AudioEncoder.AacLc -> AacSupport.supports(sampleRate, channels)

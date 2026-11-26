@@ -154,7 +154,7 @@ The defaults (16 kHz, mono, 16-bit, 100 ms chunks) suit speech and most speech-t
 | WAV file | 16-bit PCM | 16-bit PCM |
 | Interruptions | Recording callback `isClientSilenced` (API 29+) | `AVAudioSession` interruption notifications |
 | Route changes | Handled by the system | Tap rebuilt for the new input format |
-| Input devices | `AudioManager.getDevices` + `setPreferredDevice` (Bluetooth headsets not listed yet) | `availableInputs` + `setPreferredInput` |
+| Input devices | `AudioManager.getDevices` + `setPreferredDevice`; Bluetooth through `setCommunicationDevice` (API 31+) or `startBluetoothSco` | `availableInputs` + `setPreferredInput` |
 
 ### Voice processing (experimental)
 
@@ -204,7 +204,6 @@ Start it while the app is visible; since Android 14 a microphone service cannot 
 
 - Speech-to-text module on top of the capture: on-device (`SpeechRecognizer`, `SFSpeechRecognizer`) and cloud.
 - JVM desktop and Wasm targets.
-- Bluetooth SCO routing on Android.
 
 ## License
 

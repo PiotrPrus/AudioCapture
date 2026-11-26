@@ -8,12 +8,25 @@ import dev.piotrprus.audiocapture.internal.toInputDevice
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.IO
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withContext
 import platform.AVFAudio.AVAudioSession
+import platform.AVFAudio.AVAudioSessionCategoryOptionAllowBluetoothHFP
 import platform.AVFAudio.AVAudioSessionCategoryPlayAndRecord
 import platform.AVFAudio.AVAudioSessionCategoryRecord
 import platform.AVFAudio.AVAudioSessionPortDescription
+import platform.AVFAudio.AVAudioSessionRouteChangeNotification
+import platform.AVFAudio.AVAudioSessionRouteChangeReasonKey
+import platform.AVFAudio.AVAudioSessionRouteChangeReasonNewDeviceAvailable
+import platform.AVFAudio.AVAudioSessionRouteChangeReasonOldDeviceUnavailable
 import platform.AVFAudio.availableInputs
+import platform.Foundation.NSNotificationCenter
+import platform.Foundation.NSNumber
+import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSApplicationSupportDirectory
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSURL
@@ -39,26 +52,60 @@ private class IosAudioCapture : AudioCapture {
     }
 
     /**
-     * iOS only lists inputs while the audio session category can record. When it cannot (the
-     * default, `soloAmbient`), the category is switched to `playAndRecord` just long enough to
-     * read the list and then put back with its original mode and options.
+     * iOS only lists inputs while the audio session category can record, and only lists Bluetooth
+     * headsets while the category allows the hands-free profile. When either is missing, the
+     * category is switched to `playAndRecord` with `allowBluetoothHFP` just long enough to read the
+     * list and then put back with its original mode and options.
+     *
+     * While a capture session is running the category is left alone, since switching it would
+     * re-route the recording. Bluetooth headsets are then listed only if that session allows them.
      */
     override fun inputDevices(): List<InputDevice> {
         val category = session.category
         val mode = session.mode
         val options = session.categoryOptions
         val canRecord = category == AVAudioSessionCategoryRecord || category == AVAudioSessionCategoryPlayAndRecord
-        if (!canRecord) session.setCategory(AVAudioSessionCategoryPlayAndRecord, null)
+        val listsBluetooth = (options and AVAudioSessionCategoryOptionAllowBluetoothHFP) != 0uL
+        val switched = (!canRecord || !listsBluetooth) && IosCaptureEngine.activeSessions.value == 0
+        if (switched) {
+            session.setCategory(
+                if (canRecord) category else AVAudioSessionCategoryPlayAndRecord,
+                mode,
+                (if (canRecord) options else 0uL) or AVAudioSessionCategoryOptionAllowBluetoothHFP,
+                null,
+            )
+        }
         try {
             return session.availableInputs.orEmpty()
                 .filterIsInstance<AVAudioSessionPortDescription>()
                 .map { it.toInputDevice() }
         } finally {
-            if (!canRecord && category != null) {
+            if (switched && category != null) {
                 session.setCategory(category, mode, options, null)
             }
         }
     }
+
+    /**
+     * Re-reads [inputDevices] when a device connects or disconnects. Other route changes are
+     * ignored, which also keeps the category switch inside [inputDevices] from triggering itself.
+     */
+    override fun inputDevicesFlow(): Flow<List<InputDevice>> = callbackFlow {
+        trySend(inputDevices())
+        val observer = NSNotificationCenter.defaultCenter.addObserverForName(
+            AVAudioSessionRouteChangeNotification,
+            session,
+            NSOperationQueue.mainQueue,
+        ) { note ->
+            val reason = (note?.userInfo?.get(AVAudioSessionRouteChangeReasonKey) as? NSNumber)?.unsignedIntegerValue
+            if (reason == AVAudioSessionRouteChangeReasonNewDeviceAvailable ||
+                reason == AVAudioSessionRouteChangeReasonOldDeviceUnavailable
+            ) {
+                trySend(inputDevices())
+            }
+        }
+        awaitClose { NSNotificationCenter.defaultCenter.removeObserver(observer) }
+    }.conflate().distinctUntilChanged()
 
     override fun isSupported(encoder: AudioEncoder, sampleRate: Int, channels: Int): Boolean = when (encoder) {
         AudioEncoder.AacLc -> sampleRate in 8_000..48_000 && channels in 1..2
