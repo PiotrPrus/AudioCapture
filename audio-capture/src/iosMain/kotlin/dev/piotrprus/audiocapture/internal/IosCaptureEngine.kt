@@ -4,12 +4,14 @@ import dev.piotrprus.audiocapture.AudioCaptureException
 import dev.piotrprus.audiocapture.CaptureConfig
 import dev.piotrprus.audiocapture.ExperimentalVoiceProcessing
 import dev.piotrprus.audiocapture.InputDevice
+import dev.piotrprus.audiocapture.InputDeviceType
 import dev.piotrprus.audiocapture.InterruptionMode
 import dev.piotrprus.audiocapture.IosBluetoothInput
 import dev.piotrprus.audiocapture.IosDucking
 import dev.piotrprus.audiocapture.IosSessionCategory
 import dev.piotrprus.audiocapture.IosSessionMode
 import dev.piotrprus.audiocapture.VoiceProcessing
+import kotlin.concurrent.AtomicInt
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -117,6 +119,8 @@ internal class IosCaptureEngine(private val config: CaptureConfig) : CaptureEngi
         get() = voiceProcessing?.let { VoiceProcessing(echoCancel = true, noiseSuppress = true, autoGain = it.autoGain) }
 
     override fun start(listener: CaptureEngine.Listener) = locked {
+        // Counted before anything can throw: a failed start is followed by stop(), which uncounts it.
+        activeSessions.incrementAndGet()
         this.listener = listener
         if (voiceProcessing != null && config.ios.category != IosSessionCategory.PlayAndRecord) {
             throw AudioCaptureException("Voice processing on iOS needs IosSessionCategory.PlayAndRecord")
@@ -142,6 +146,7 @@ internal class IosCaptureEngine(private val config: CaptureConfig) : CaptureEngi
     override fun stop() = locked {
         if (stopped) return@locked
         stopped = true
+        activeSessions.decrementAndGet()
         sessionObservers.forEach { NSNotificationCenter.defaultCenter.removeObserver(it) }
         sessionObservers.clear()
         tearDownEngine()
@@ -173,7 +178,11 @@ internal class IosCaptureEngine(private val config: CaptureConfig) : CaptureEngi
             IosSessionMode.VoiceChat -> AVAudioSessionModeVoiceChat
         }
         var options = 0uL
-        when (config.ios.bluetoothInput) {
+        // Choosing a Bluetooth microphone is consent to its call profile, whatever bluetoothInput says.
+        val bluetoothInput = config.ios.bluetoothInput.takeUnless {
+            it == IosBluetoothInput.Off && config.device?.type == InputDeviceType.Bluetooth
+        } ?: IosBluetoothInput.Hfp
+        when (bluetoothInput) {
             IosBluetoothInput.Off -> Unit
             IosBluetoothInput.Hfp -> options = options or AVAudioSessionCategoryOptionAllowBluetoothHFP
             IosBluetoothInput.HighQuality -> {
@@ -189,7 +198,7 @@ internal class IosCaptureEngine(private val config: CaptureConfig) : CaptureEngi
         config.device?.let { wanted ->
             val port = session.availableInputs.orEmpty()
                 .filterIsInstance<AVAudioSessionPortDescription>()
-                .firstOrNull { it.UID == wanted.id }
+                .firstOrNull { it.UID == wanted.id || it.UID == wanted.stableKey }
                 ?: throw AudioCaptureException("${wanted.name} is no longer connected")
             nsCheck("Could not select ${wanted.name}") { session.setPreferredInput(port, it) }
         }
@@ -401,7 +410,10 @@ internal class IosCaptureEngine(private val config: CaptureConfig) : CaptureEngi
         }
     }
 
-    private companion object {
+    internal companion object {
+        /** Sessions between start and stop, in this process. */
+        val activeSessions = AtomicInt(0)
+
         /** Resampler output can run a few frames past the exact ratio. */
         const val CONVERTER_SLACK_FRAMES = 64u
 

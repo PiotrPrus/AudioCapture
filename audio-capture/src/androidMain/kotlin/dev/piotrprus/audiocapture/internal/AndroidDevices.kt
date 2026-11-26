@@ -1,6 +1,7 @@
 package dev.piotrprus.audiocapture.internal
 
 import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.os.Build
 import dev.piotrprus.audiocapture.InputDevice
 import dev.piotrprus.audiocapture.InputDeviceType
@@ -28,8 +29,23 @@ internal fun AudioDeviceInfo.toInputDevice(): InputDevice? {
             else -> InputDeviceType.Other
         }
     }
-    // Phones list each built-in microphone separately ("bottom", "back"); the address tells them apart.
     val address = address.orEmpty()
-    val name = productName.toString() + if (address.isNotBlank()) " ($address)" else ""
-    return InputDevice(id = id.toString(), name = name, type = inputType)
+    val product = productName?.toString().orEmpty()
+    // Phones list each built-in microphone separately ("bottom", "back"); the address tells them apart.
+    val name = if (inputType == InputDeviceType.BuiltIn && address.isNotBlank()) "$product ($address)" else product
+    // The id changes on every reconnect. The address does not: for Bluetooth it is the device's
+    // Bluetooth address, which is what tells two connected headsets apart.
+    val stableKey = "$type:" + address.ifBlank { product }
+    return InputDevice(id = id.toString(), name = name, type = inputType, stableKey = stableKey)
+}
+
+internal val AudioDeviceInfo.isBluetoothInput: Boolean
+    get() = type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+        (Build.VERSION.SDK_INT >= 31 && type == AudioDeviceInfo.TYPE_BLE_HEADSET)
+
+/** The connected input for [wanted]: the same connection if it is still there, else the same physical device. */
+internal fun AudioManager.findInput(wanted: InputDevice): AudioDeviceInfo? {
+    val inputs = getDevices(AudioManager.GET_DEVICES_INPUTS)
+    return inputs.firstOrNull { it.id.toString() == wanted.id }
+        ?: inputs.firstOrNull { it.toInputDevice()?.stableKey == wanted.stableKey }
 }

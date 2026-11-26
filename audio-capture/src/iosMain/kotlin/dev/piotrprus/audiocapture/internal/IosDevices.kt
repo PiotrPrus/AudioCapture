@@ -5,6 +5,7 @@ import dev.piotrprus.audiocapture.InputDeviceType
 import platform.AVFAudio.AVAudioSessionPortBluetoothHFP
 import platform.AVFAudio.AVAudioSessionPortBluetoothLE
 import platform.AVFAudio.AVAudioSessionPortBuiltInMic
+import platform.AVFAudio.AVAudioSessionPortCarAudio
 import platform.AVFAudio.AVAudioSessionPortDescription
 import platform.AVFAudio.AVAudioSessionPortHeadsetMic
 import platform.AVFAudio.AVAudioSessionPortLineIn
@@ -19,6 +20,9 @@ internal fun AVAudioSessionPortDescription.toInputDevice(): InputDevice = InputD
         AVAudioSessionPortBluetoothHFP, AVAudioSessionPortBluetoothLE -> InputDeviceType.Bluetooth
         AVAudioSessionPortUSBAudio -> InputDeviceType.Usb
         AVAudioSessionPortLineIn -> InputDeviceType.LineIn
+        AVAudioSessionPortCarAudio -> InputDeviceType.Car
         else -> InputDeviceType.Other
     },
+    // The port UID already survives reconnects.
+    stableKey = UID,
 )

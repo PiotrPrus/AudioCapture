@@ -36,6 +36,10 @@ import dev.piotrprus.audiocapture.VoiceProcessing
  *
  * If the audio server dies (`ERROR_DEAD_OBJECT`, also seen on some route changes) the recorder is
  * rebuilt once and capture carries on.
+ *
+ * A Bluetooth [CaptureConfig.device] is routed with [BluetoothRoute] before the recorder is
+ * created and released on [stop]. The headset stays in its call profile while the session is
+ * paused, so resuming is immediate.
  */
 internal class AndroidCaptureEngine(
     context: Context,
@@ -51,6 +55,7 @@ internal class AndroidCaptureEngine(
     private var floatSamples = true
     private var thread: Thread? = null
     private val effects = mutableListOf<AudioEffect>()
+    private val bluetoothRoute = BluetoothRoute(appContext, audioManager)
 
     @Volatile
     private var applied: VoiceProcessing? = null
@@ -75,6 +80,7 @@ internal class AndroidCaptureEngine(
 
     override fun start(listener: CaptureEngine.Listener) {
         this.listener = listener
+        config.device?.let { wanted -> routeBluetooth(wanted) }
         val created = createRecord()
         record = created
         attachEffects(created.audioSessionId)
@@ -112,12 +118,19 @@ internal class AndroidCaptureEngine(
             // is stuck, it releases the recorder itself when read() finally returns.
             if (exited) record?.release() else releaseOnExit = true
             record = null
+            bluetoothRoute.release()
         }
     }
 
+    private fun routeBluetooth(wanted: InputDevice) {
+        val device = audioManager.findInput(wanted)
+            ?: throw AudioCaptureException("${wanted.name} is no longer connected")
+        if (device.isBluetoothInput) bluetoothRoute.acquire(device)
+    }
+
     private fun preferDevice(target: AudioRecord, wanted: InputDevice) {
-        val device = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
-            .firstOrNull { it.id.toString() == wanted.id }
+        // Looked up again: below API 31 the headset's input can reappear with a new id once SCO connects.
+        val device = audioManager.findInput(wanted)
             ?: throw AudioCaptureException("${wanted.name} is no longer connected")
         if (!target.setPreferredDevice(device)) {
             throw AudioCaptureException("The system refused to record from ${wanted.name}")
