@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import platform.AVFAudio.AVAudioSession
 import platform.AVFAudio.AVAudioSessionCategoryOptionAllowBluetoothHFP
@@ -21,16 +23,15 @@ import platform.AVFAudio.AVAudioSessionCategoryRecord
 import platform.AVFAudio.AVAudioSessionPortDescription
 import platform.AVFAudio.AVAudioSessionRouteChangeNotification
 import platform.AVFAudio.AVAudioSessionRouteChangeReasonKey
-import platform.AVFAudio.AVAudioSessionRouteChangeReasonNewDeviceAvailable
-import platform.AVFAudio.AVAudioSessionRouteChangeReasonOldDeviceUnavailable
+import platform.AVFAudio.AVAudioSessionRouteChangeReasonCategoryChange
 import platform.AVFAudio.availableInputs
 import platform.Foundation.NSNotificationCenter
 import platform.Foundation.NSNumber
-import platform.Foundation.NSOperationQueue
 import platform.Foundation.NSApplicationSupportDirectory
 import platform.Foundation.NSFileManager
 import platform.Foundation.NSURL
 import platform.Foundation.NSUserDomainMask
+import platform.UIKit.UIApplicationDidBecomeActiveNotification
 
 public actual fun AudioCapture(): AudioCapture = IosAudioCapture()
 
@@ -87,25 +88,29 @@ private class IosAudioCapture : AudioCapture {
     }
 
     /**
-     * Re-reads [inputDevices] when a device connects or disconnects. Other route changes are
-     * ignored, which also keeps the category switch inside [inputDevices] from triggering itself.
+     * Re-reads [inputDevices] on every audio route change except a category change, and whenever
+     * the app becomes active (a headset may have connected while it was in the background).
+     *
+     * Category changes are skipped on purpose: [inputDevices] switches the category to read the
+     * list, so reacting to them would make it trigger itself in an endless loop. The list is read
+     * off the main thread because switching the category can take tens of milliseconds, and a burst
+     * of notifications is read once.
      */
     override fun inputDevicesFlow(): Flow<List<InputDevice>> = callbackFlow {
-        trySend(inputDevices())
-        val observer = NSNotificationCenter.defaultCenter.addObserverForName(
-            AVAudioSessionRouteChangeNotification,
-            session,
-            NSOperationQueue.mainQueue,
-        ) { note ->
-            val reason = (note?.userInfo?.get(AVAudioSessionRouteChangeReasonKey) as? NSNumber)?.unsignedIntegerValue
-            if (reason == AVAudioSessionRouteChangeReasonNewDeviceAvailable ||
-                reason == AVAudioSessionRouteChangeReasonOldDeviceUnavailable
-            ) {
-                trySend(inputDevices())
-            }
-        }
-        awaitClose { NSNotificationCenter.defaultCenter.removeObserver(observer) }
-    }.conflate().distinctUntilChanged()
+        send(Unit)
+        val center = NSNotificationCenter.defaultCenter
+        val observers = listOf(
+            center.addObserverForName(AVAudioSessionRouteChangeNotification, session, null) { note ->
+                val reason = (note?.userInfo?.get(AVAudioSessionRouteChangeReasonKey) as? NSNumber)?.unsignedIntegerValue
+                if (reason != AVAudioSessionRouteChangeReasonCategoryChange) trySend(Unit)
+            },
+            center.addObserverForName(UIApplicationDidBecomeActiveNotification, null, null) { _ -> trySend(Unit) },
+        )
+        awaitClose { observers.forEach { center.removeObserver(it) } }
+    }.conflate()
+        .map { inputDevices() }
+        .flowOn(Dispatchers.IO)
+        .distinctUntilChanged()
 
     override fun isSupported(encoder: AudioEncoder, sampleRate: Int, channels: Int): Boolean = when (encoder) {
         AudioEncoder.AacLc -> sampleRate in 8_000..48_000 && channels in 1..2

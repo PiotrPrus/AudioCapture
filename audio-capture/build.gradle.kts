@@ -20,6 +20,11 @@ kotlin {
         }
 
         withHostTest {}
+
+        // On-device checks of real microphones and Bluetooth routing: ./gradlew :audio-capture:connectedAndroidDeviceTest
+        withDeviceTest {
+            instrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        }
     }
 
     iosArm64()
@@ -40,6 +45,13 @@ kotlin {
         androidMain.dependencies {
             implementation(libs.androidx.startup)
             implementation(libs.androidx.annotation)
+        }
+        getByName("androidDeviceTest").dependencies {
+            implementation(libs.kotlin.test)
+            implementation(libs.androidx.test.runner)
+            implementation(libs.androidx.test.rules)
+            implementation(libs.androidx.test.core)
+            implementation(libs.androidx.test.ext.junit)
         }
     }
 }

@@ -2,12 +2,15 @@
 
 ## Unreleased
 
-- Bluetooth headset microphones are listed by `inputDevices()` on both platforms, one entry per connected headset, so an app can pick between several. Recording from one uses the headset's call profile (8–16 kHz).
-- Android: a Bluetooth `CaptureConfig.device` is routed with `setCommunicationDevice` (API 31+, matched by address) or `startBluetoothSco` (below API 31, active headset only), and the routing is put back when the session stops. The library manifest adds `MODIFY_AUDIO_SETTINGS` and `BLUETOOTH` (max SDK 30), both granted at install.
+- Bluetooth headset microphones are listed by `inputDevices()`. iOS lists every connected headset, so an app can pick between several. Android lists only the headset that is the system's active device for calls. Recording from one uses the headset's call profile (8–16 kHz).
+- Android: a Bluetooth `CaptureConfig.device` is routed with `setCommunicationDevice` (API 31+, matched by address) or `startBluetoothSco` (below API 31), and the routing is put back when the session stops. The library manifest adds `MODIFY_AUDIO_SETTINGS` and `BLUETOOTH` (max SDK 30), both granted at install.
 - iOS: choosing a Bluetooth `CaptureConfig.device` turns on `IosBluetoothInput.Hfp` for that session when `bluetoothInput` is `Off`.
 - `InputDevice.stableKey` identifies the same device across reconnects, for saving the user's choice. A `CaptureConfig.device` whose `id` is gone is found again by this key.
 - `InputDeviceType.Car` for CarPlay audio on iOS.
 - `AudioCapture.inputDevicesFlow()`: the device list, updated as microphones connect and disconnect.
+- iOS: `inputDevicesFlow()` reacts to every route change except category changes, and to the app becoming active.
+- Sample app: a microphone dropdown on the Everything screen, kept current with `inputDevicesFlow()`.
+- `androidDeviceTest` source set with an on-device routing test: `./gradlew :audio-capture:connectedAndroidDeviceTest`.
 - Android: device names no longer include the address, except for built-in microphones, which need it to tell them apart.
 
 ## 0.1.0 — 2026-09-23
