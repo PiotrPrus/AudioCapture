@@ -60,7 +60,7 @@ mavenPublishing {
     publishToMavenCentral()
     signAllPublications()
 
-    coordinates("io.github.piotrprus", "audio-capture", "0.1.0")
+    coordinates("io.github.piotrprus", "audio-capture", "0.2.0")
 
     pom {
         name.set("AudioCapture")

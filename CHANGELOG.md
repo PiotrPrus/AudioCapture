@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-11-27
+
+Breaking: `AudioCapture` has a new method, `inputDevicesFlow()`, and `InputDeviceType` has a new value, `Car`. Exhaustive `when` expressions over `InputDeviceType` must handle it.
 
 - Bluetooth headset microphones are listed by `inputDevices()`. iOS lists every connected headset, so an app can pick between several. Android lists only the headset that is the system's active device for calls. Recording from one uses the headset's call profile (8–16 kHz).
 - Android: a Bluetooth `CaptureConfig.device` is routed with `setCommunicationDevice` (API 31+, matched by address) or `startBluetoothSco` (below API 31), and the routing is put back when the session stops. The library manifest adds `MODIFY_AUDIO_SETTINGS` and `BLUETOOTH` (max SDK 30), both granted at install.
