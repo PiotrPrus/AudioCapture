@@ -17,9 +17,10 @@ import java.util.concurrent.TimeUnit
  * back on [release].
  *
  * Android only records from a Bluetooth microphone while that headset is the communication device.
- * From API 31 the app names the headset with `setCommunicationDevice`, matched by address, so it
- * can pick between several connected headsets. Below API 31 `startBluetoothSco` connects whichever
- * headset the system treats as active.
+ * From API 31 the app names the headset with `setCommunicationDevice`, matched by address. Below
+ * API 31 `startBluetoothSco` connects whichever headset is active. Either way Android only offers
+ * the headset that is the system's active device for calls (seen on a Pixel 10 Pro, Android 16:
+ * a connected Pixel Watch was in neither the input list nor `availableCommunicationDevices`).
  */
 internal class BluetoothRoute(context: Context, private val audioManager: AudioManager) {
 

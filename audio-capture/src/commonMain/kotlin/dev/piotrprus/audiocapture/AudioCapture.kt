@@ -43,9 +43,11 @@ public interface AudioCapture {
      * as headsets and USB devices come and go, so read it when you need it rather than caching it,
      * or collect [inputDevicesFlow].
      *
-     * Bluetooth headsets are listed, one entry per connected headset. Recording from one switches
-     * it to its call profile, which records at 8–16 kHz. On Android below API 31 only the headset
-     * the system treats as active can record, so only that one is listed.
+     * Bluetooth headsets are listed. Recording from one switches it to its call profile, which
+     * records at 8–16 kHz. iOS lists every connected headset. Android lists only the headset that
+     * is the system's active device for calls; the user changes it in the Bluetooth settings and
+     * the list follows. Devices that connect only for call handling, such as a Pixel Watch, are
+     * not listed on Android unless they are that active device.
      */
     public fun inputDevices(): List<InputDevice>
 

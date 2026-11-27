@@ -89,8 +89,8 @@ public data class AudioLevel(
 /**
  * A microphone the system can record from.
  *
- * Several devices of the same [type] can be connected at once, for example two Bluetooth
- * headsets. Each is its own [InputDevice] with its own [id] and [stableKey]. Their [name]s can
+ * Several devices of the same [type] can be listed at once, for example two Bluetooth headsets
+ * on iOS. Each is its own [InputDevice] with its own [id] and [stableKey]. Their [name]s can
  * match (two pairs of the same headphones), so apps that show them side by side should tell them
  * apart themselves.
  */

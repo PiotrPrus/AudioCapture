@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Keeps the test process in the foreground so Android does not silence the microphone. -->
+        <activity
+            android:name="dev.piotrprus.audiocapture.ForegroundActivity"
+            android:exported="false" />
+    </application>
+</manifest>

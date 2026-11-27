@@ -17,6 +17,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -43,6 +49,7 @@ import dev.piotrprus.audiocapture.CaptureSession
 import dev.piotrprus.audiocapture.CaptureState
 import dev.piotrprus.audiocapture.ExperimentalVoiceProcessing
 import dev.piotrprus.audiocapture.FileOutput
+import dev.piotrprus.audiocapture.InputDevice
 import dev.piotrprus.audiocapture.Recording
 import dev.piotrprus.audiocapture.PcmOutput
 import dev.piotrprus.audiocapture.VoiceProcessing
@@ -91,6 +98,10 @@ private fun FullDemo() {
     var error by remember { mutableStateOf<String?>(null) }
     var chunkCount by remember { mutableIntStateOf(0) }
     var streamed by remember { mutableStateOf(Duration.ZERO) }
+    val devices by remember { capture.inputDevicesFlow() }.collectAsState(initial = emptyList())
+    // Saved by stableKey, so the choice survives a headset reconnecting with a new id.
+    var deviceKey by remember { mutableStateOf<String?>(null) }
+    val device = devices.firstOrNull { it.stableKey == deviceKey }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("Permission: ${capture.permission()}", style = MaterialTheme.typography.bodyMedium)
@@ -118,6 +129,7 @@ private fun FullDemo() {
                         FileOutput(capture.recordingPath("capture.$extension"))
                     },
                     voiceProcessing = if (voiceProcessing) VoiceProcessing() else null,
+                    device = device,
                 )
                 scope.launch {
                     try {
@@ -127,8 +139,7 @@ private fun FullDemo() {
                     }
                 }
             }) { Text("Start") }
-            Text("Inputs", style = MaterialTheme.typography.titleMedium)
-            capture.inputDevices().forEach { Text("• ${it.name} (${it.type})") }
+            MicrophonePicker(devices, selected = device, onSelect = { deviceKey = it?.stableKey })
         } else {
             ActiveSession(
                 session = active,
@@ -139,6 +150,7 @@ private fun FullDemo() {
                     session = null
                 },
             )
+            Text("Recording from: ${active.inputDevice?.let { "${it.name} (${it.type})" } ?: "unknown"}")
             Text("Chunks: $chunkCount · streamed: $streamed")
         }
 
@@ -193,5 +205,41 @@ private fun ActiveSession(
         }
         Button(onClick = { scope.launch { onFinished(session.stop(), null) } }) { Text("Stop") }
         OutlinedButton(onClick = { scope.launch { session.cancel(); onFinished(null, null) } }) { Text("Cancel") }
+    }
+}
+
+/** Dropdown of "System default" plus every connected microphone. Devices with the same name get a number. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MicrophonePicker(devices: List<InputDevice>, selected: InputDevice?, onSelect: (InputDevice?) -> Unit) {
+    fun label(device: InputDevice?): String {
+        if (device == null) return "System default"
+        val sameName = devices.filter { it.name == device.name }
+        val name = if (sameName.size > 1) "${device.name} (${sameName.indexOf(device) + 1})" else device.name
+        return "$name · ${device.type}"
+    }
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = label(selected),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Microphone") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            (listOf(null) + devices).forEach { device ->
+                DropdownMenuItem(
+                    text = { Text(label(device)) },
+                    onClick = {
+                        onSelect(device)
+                        expanded = false
+                    },
+                )
+            }
+        }
     }
 }
