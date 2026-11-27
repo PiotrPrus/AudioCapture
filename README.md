@@ -18,7 +18,7 @@ Microphone capture for Kotlin Multiplatform, on Android and iOS.
 
 ```kotlin
 commonMain.dependencies {
-    implementation("io.github.piotrprus:audio-capture:0.1.0")
+    implementation("io.github.piotrprus:audio-capture:0.2.0")
 }
 ```
 
